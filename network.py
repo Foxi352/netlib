@@ -181,7 +181,7 @@ class Network(object):
 class tcp_client(object):
 
     def __init__(self, host, port, name=None, autoreconnect=True, connect_retries=5, connect_cycle=5, retry_cycle=30):
-        """ Validates a MAC address
+        """ Initializes a new instance of tcp_client
 
         :param host: Remote host name or ip address (v4 or v6)
         :param port: Remote host port to connect to
@@ -235,7 +235,7 @@ class tcp_client(object):
 
         # Test if host is an ip address or a host name
         if Network.is_ip(self._host):
-            # host is an ip address (v4 or v6)
+            # host is a valid ip address (v4 or v6)
             self.logger.debug("{} is a valid IP address".format(host))
             self._hostip = self._host
             if Network.is_ipv6(self._host):
@@ -243,26 +243,24 @@ class tcp_client(object):
             else:
                 self._ipver = socket.AF_INET
         else:
-            # host is a hostname, trying to resolve to ip address (v4 or v6)
+            # host is a hostname, trying to resolve to an ip address (v4 or v6)
             self.logger.debug("{} is not a valid IP address, trying to resolve it as hostname".format(host))
             try:
                 self._ipver, sockettype, proto, canonname, socketaddr = socket.getaddrinfo(host, None)[0]
                 # Check if resolved address is IPv4 or IPv6
-                if self._ipver == socket.AF_INET:
-                    # is IPv4
+                if self._ipver == socket.AF_INET: # is IPv4
                     self._hostip, port = socketaddr
-                elif self._ipver == socket.AF_INET6:
-                    # is IPv6
+                elif self._ipver == socket.AF_INET6: # is IPv6
                     self._hostip, port, flow_info, scope_id = socketaddr
                 else:
                     # This should never happen
                     self.logger.error("Unknown ip address family {}".format(self._ipver))
                     self._hostip = None
-                # Print ip address if has been resolved
+                # Print ip address on successfull resolve
                 if self._hostip is not None:
                     self.logger.info("Resolved {} to {} address {}".format(self._host, 'IPv6' if self._ipver == socket.AF_INET6 else 'IPv4', self._hostip))
             except:
-                # Impossible to resolve hostname to ip address
+                # Unable to resolve hostname
                 self.logger.error("Cannot resolve {} to a valid ip address (v4 or v6)".format(self._host))
                 self._hostip = None
 
@@ -292,15 +290,14 @@ class tcp_client(object):
     def connect(self):
         """ Connects the socket
 
-        :return: False if an error prevented us from launching a connection thread. True if connection thread will be started.
+        :return: False if an error prevented us from launching a connection thread. True if a connection thread has been started.
         :rtype: bool
         """
-        # return immediatly if no valid ip has been found in __init__
-        if self._hostip is None:
+        if self._hostip is None: # return False if no valid ip to connect to
             self.logger.error("No valid IP address to connect to {}".format(self._host))
             self._is_connected = False
             return False
-        if self._is_connected:
+        if self._is_connected: # return false if already connected
             self.logger.error("Already connected to {}, ignoring new request".format(self._host))
             return False
 
@@ -339,9 +336,7 @@ class tcp_client(object):
                 if self._is_connected:
                     try:
                         self.__connect_threadlock.release()
-                        if self._connected_callback is not None:
-                            #self.logger.debug(self)
-                            self._connected_callback(self)
+                        self._connected_callback and self._connected_callback(self)
                         self.__receive_thread = threading.Thread(target=self._receive_thread_worker, name='TCP_Receive')
                         self.__receive_thread.daemon = True
                         self.__receive_thread.start()
@@ -396,8 +391,7 @@ class tcp_client(object):
                         self.logger.warning("Connection closed by peer {}".format(self._host))
                         self._is_connected = False
                         poller.unregister(self._socket)
-                        if self._disconnected_callback is not None:
-                            self._disconnected_callback(self)
+                        self._disconnected_callback and self._disconnected_callback(self)
                         if self._autoreconnect:
                             self.logger.debug("Autoreconnect enabled for {}".format(self._host))
                             self.connect()
