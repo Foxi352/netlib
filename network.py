@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # vim: set encoding=utf-8 tabstop=4 softtabstop=4 shiftwidth=4 expandtab
 #########################################################################
+#  Parts Copyright 2016 C. Strassburg (lib.utils)     c.strassburg@gmx.de
 #  Copyright 2017- Serge Wagener                     serge@wagener.family
 #########################################################################
 #  This file is part of SmartHomeNG
@@ -33,6 +34,7 @@ import select
 import socket
 import threading
 import time
+import urllib3
 
 
 class Network(object):
@@ -404,6 +406,165 @@ class tcp_client(object):
 
     def close(self):
         self.logger.info("Closing connection to {} on TCP port {}".format(self._host, self._port))
+        self.__running = False
+        if self.__connect_thread is not None and self.__connect_thread.isAlive():
+            self.__connect_thread.join()
+        if self.__receive_thread is not None and self.__receive_thread.isAlive():
+            self.__receive_thread.join()
+
+
+class tcp_server(object):
+
+    def __init__(self, port, interface='::', name=None):
+        """ Initializes a new instance of tcp_client
+
+        :param interface: Remote interface name or ip address (v4 or v6)
+        :param port: Remote interface port to connect to
+        :param name: Name of this connection (mainly for logging purposes)
+        :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
+        :param connect_retries: Number of connect retries per cycle
+        :param connect_cycle: Time between retries inside a connect cycle
+        :param retry_cycle: Time between cycles if :param:autoreconnect is True
+
+        :type interface: str
+        :type port: int
+        :type name: str
+        :type name: bool
+        :type connect_retries: int
+        :type connect_cycle: int
+        :type retry_cycle: int
+        """
+        self.logger = logging.getLogger(__name__)
+
+        # Public properties
+        self.name = name
+
+        # "Private" properties
+        self._interface = interface
+        self._port = port
+        self._is_listening = False
+        self._timeout = 1
+
+        self._interfaceip = None
+        self._ipver = socket.AF_INET
+        self._socket = None
+
+        self._connected_callback = None
+        self._disconnected_callback = None
+        self._data_received_callback = None
+
+        # "Secret" properties
+        self.__connect_thread = None
+        self.__connect_threadlock = threading.Lock()
+        self.__receive_thread = None
+        self.__receive_threadlock = threading.Lock()
+        self.__running = True
+
+        # Test if host is an ip address or a host name
+        if Network.is_ip(self._interface):
+            # host is a valid ip address (v4 or v6)
+            self.logger.debug("{} is a valid IP address".format(self._interface))
+            self._interfaceip = self._interface
+            if Network.is_ipv6(self._interface):
+                self._ipver = socket.AF_INET6
+            else:
+                self._ipver = socket.AF_INET
+        else:
+            # host is a hostname, trying to resolve to an ip address (v4 or v6)
+            self.logger.debug("{} is not a valid IP address, trying to resolve it as hostname".format(self._interface))
+            try:
+                self._ipver, sockettype, proto, canonname, socketaddr = socket.getaddrinfo(self._interface, None)[0]
+                # Check if resolved address is IPv4 or IPv6
+                if self._ipver == socket.AF_INET: # is IPv4
+                    self._interfaceip, port = socketaddr
+                elif self._ipver == socket.AF_INET6: # is IPv6
+                    self._interfaceip, port, flow_info, scope_id = socketaddr
+                else:
+                    # This should never happen
+                    self.logger.error("Unknown ip address family {}".format(self._ipver))
+                    self._interfaceip = None
+                # Print ip address on successfull resolve
+                if self._interfaceip is not None:
+                    self.logger.info("Resolved {} to {} address {}".format(self._interface, 'IPv6' if self._ipver == socket.AF_INET6 else 'IPv4', self._hostip))
+            except:
+                # Unable to resolve hostname
+                self.logger.error("Cannot resolve {} to a valid ip address (v4 or v6)".format(self._interface))
+                self._interfaceip = None
+
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.info("Initializing a TCP server socket on interface {} port {}".format(self._interfaceip, self._port))
+        
+    @property
+    def name(self):
+        return self.__name
+
+    @name.setter
+    def name(self, name):
+        self.__name = name
+
+    def set_callbacks(self, connected=None, data_received=None, disconnected=None):
+        """ Set callbacks to caller for different socket events
+
+        :param connected: Called whenever a connection is established successfully
+        :param data_received: Called when data is received
+        :param disconnected: Called when a connection has been dropped for whatever reason
+
+        :type connected: function
+        :type data_received: function
+        :type disconnected: function
+        """
+        self._connected_callback = connected
+        self._disconnected_callback = disconnected
+        self._data_received_callback = data_received
+
+    def start(self):
+        """ Start the server socket
+
+        :return: False if an error prevented us from launching a connection thread. True if a connection thread has been started.
+        :rtype: bool
+        """
+        if self._is_listening:
+            return       
+        try:
+            
+            self._socket = socket.socket(self._ipver, socket.SOCK_STREAM)
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._socket.bind((self._interfaceip, self._port))
+        except Exception as e:
+            self.logger.error("Problem binding to interface {} on port {}: {}".format(self._interfaceip, self._port, e))
+            self._is_listening = False
+            return False
+        else:
+            self.logger.info("Bound to interface {} on port {}".format(self._interfaceip, self._port))
+            #self._poller.register_server(self.socket.fileno(), self)
+        
+        try:
+            self._socket.listen(5)   
+            self._socket.setblocking(0)
+        except Exception as e:
+            self.logger.error("Problem starting listening to interface {} on port {}: {}".format(self._interfaceip, self._port, e))
+            self._is_listening = False
+            return False
+
+        self._is_listening = True
+        return True   
+
+    def started(self):
+        """ Returns the current connection state
+
+        :return: True if an active connection exists,else False.
+        :rtype: bool
+        """
+        return self._is_started
+
+    def _wait(self, time_lapse):
+        time_start = time.time()
+        time_end = (time_start + time_lapse)
+        while self.__running and time_end > time.time():
+            pass
+
+    def close(self):
+        self.logger.info("Closing connection to {} on TCP port {}".format(self._interface, self._port))
         self.__running = False
         if self.__connect_thread is not None and self.__connect_thread.isAlive():
             self.__connect_thread.join()
