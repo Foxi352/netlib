@@ -29,13 +29,14 @@ def listening_callback(server):
     logger.debug("CALLBACK: {} listening".format(server.name))
 
 def incoming_connection_callback(server,client):
-    logger.debug("CALLBACK: incoming connection on {} from {}".format(server.name, client[0]))
+    logger.debug("CALLBACK: incoming connection on {} from {}".format(server.name, client.name))
 
 def disconnected_callback(server,client):
     logger.debug("CALLBACK: {} disconnected".format(client))
 
 def receive_callback(server, client, data):
-    logger.debug("CALLBACK: received from {}: {}".format(client,data))
+    logger.debug("CALLBACK: received from {}: {}".format(client.name,data))
+    server.send(client,'Ich bin hier !')
 
 server = Network.tcp_server(port=5555,name='TEST')
 server.set_callbacks(   listening=listening_callback, 

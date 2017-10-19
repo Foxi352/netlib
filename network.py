@@ -414,6 +414,25 @@ class tcp_client(object):
             self.__receive_thread.join()
 
 
+class Client(object):
+    def __init__(self, socket=None, fd=None):
+        self._fd = fd
+        self.__socket = socket
+        self.__name = None
+
+    @property
+    def socket(self):
+        return self.__socket
+
+    @property
+    def name(self):
+        return self.__name
+
+    @name.setter
+    def name(self, name):
+        self.__name = name
+
+
 class tcp_server(object):
     """ Initializes a new instance of tcp_server
 
@@ -469,7 +488,7 @@ class tcp_server(object):
             # host is a valid ip address (v4 or v6)
             self.logger.debug("{} is a valid IP address".format(self._interface))
             self._interfaceip = self._interface
-            if Network.is_ipv6(self._interface):
+            if Network.is_ipv6(self._interfaceip):
                 self._ipver = socket.AF_INET6
             else:
                 self._ipver = socket.AF_INET
@@ -557,7 +576,7 @@ class tcp_server(object):
         self.__listening_thread = threading.Thread(target=self.__listening_thread_worker, name='TCP_Listener')
         self.__listening_thread.daemon = True
         self.__listening_thread.start()
-        return True   
+        return True
 
     def __listening_thread_worker(self):
         poller = select.poll()
@@ -571,26 +590,36 @@ class tcp_server(object):
                 if event & select.POLLHUP:
                     self.logger.debug("Listening thread  POLLHUP")
                 if event & (select.POLLIN | select.POLLPRI):
-                    connection, address = self._socket.accept()
+                    connection, peer = self._socket.accept()
                     connection.setblocking(0)
-                    self.logger.info("Incoming connection from {} on interface {} port {}".format(address[0], self._interfaceip, self._port))
-                    self._incoming_connection_callback and self._incoming_connection_callback(self, address)
-                    self.__connection_map[connection.fileno()] = connection
+                    fd = connection.fileno()
+                    self.logger.info("Incoming connection from {} on interface {} port {}".format(peer[0], self._interfaceip, self._port))
+                    client = Client(socket=connection, fd=fd)
+                    client.ip = peer[0]
+                    client.ipver = socket.AF_INET6 if Network.is_ipv6(client.ip) else socket.AF_INET
+                    client.port = peer[1]
+                    if client.ipver == socket.AF_INET6:
+                        client.name = '[{}]:{}'.format(client.ip, client.port)
+                    else:
+                        client.name = '{}:{}'.format(client.ip, client.port)
+                    self.__connection_map[fd] = client
                     self.__message_queues[connection] = queue.Queue()
+                    self._incoming_connection_callback and self._incoming_connection_callback(self, client)
                     
                     if self.__connection_thread is None:
                         self.logger.debug("Connection thread not running yet, firing it up ...")
                         self.__connection_thread = threading.Thread(target=self.__connection_thread_worker, name='TCP_Server')
-                        if self.__connection_poller is None:
-                            self.__connection_poller = select.poll()
-                        self.__connection_poller.register(connection, select.POLLOUT| select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
+                    if self.__connection_poller is None:
+                        self.__connection_poller = select.poll()
+                    self.__connection_poller.register(connection, select.POLLOUT| select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
+                    if not self.__connection_thread.isAlive():
                         self.__connection_thread.daemon = True
                         self.__connection_thread.start()
                     
     def __connection_thread_worker(self):
         self.logger.debug("Connection thread on interface {} port {} starting up".format(self._interfaceip, self._port))
         while self.__running and len(self.__connection_map) > 0:
-            self.logger.debug("Connection thread  PING")
+            #self.logger.debug("Connection thread  PING {}".format(len(self.__connection_map)))
             self._wait(1)
             events = self.__connection_poller.poll(1000)
             for fd, event in events:
@@ -599,20 +628,23 @@ class tcp_server(object):
                 if event & select.POLLHUP:
                     self.logger.debug("Connection thread  POLLHUP")
                 if event & select.POLLOUT:
-                    self.logger.debug("Connection thread  POLLOUT")
+                    pass
                 if event & (select.POLLIN | select.POLLPRI):
-                    __socket = self.__connection_map[fd]
+                    __client = self.__connection_map[fd]
+                    __socket = __client.socket
                     msg = __socket.recv(4096)
                     if msg:
-                        self._data_received_callback and self._data_received_callback(self, __socket.getpeername()[0], str.rstrip(str(msg, 'utf-8')))
+                        self.logger.debug("Received data from {} {} {} {}".format(__client.name, __client.ip,  'IPv6' if __client.ipver == socket.AF_INET6 else 'IPv4', __client.port))
+                        self._data_received_callback and self._data_received_callback(self, __client, str.rstrip(str(msg, 'utf-8')))
                     else:
-                        self.logger.debug("Connection closed for client {}".format(__socket.getpeername()))
+                        self.logger.info("Connection closed for client {}".format(__client.name))
                         self._disconnected_callback and self._disconnected_callback(self, __socket.getpeername()[0])
                         self.__connection_poller.unregister(fd)
                         del self.__connection_map[fd]
                     del __socket
         self.__connection_poller = None
         self.__connection_thread = None
+        self.logger.debug("Last connection closed for interface {} port {}, stopping connection thread".format(self._interfaceip, self._port))
            
     def started(self):
         """ Returns the current connection state
@@ -621,6 +653,13 @@ class tcp_server(object):
         :rtype: bool
         """
         return self._is_started
+
+    def send(self,client,msg):
+        if client._fd in self.__connection_map:
+            client.socket.send(msg.encode('utf-8'))
+        else:
+            self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
+        
 
     def _wait(self, time_lapse):
         time_start = time.time()
