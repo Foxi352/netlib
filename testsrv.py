@@ -25,21 +25,23 @@ logger.debug("Server test started")
 ## Example calls and tests start below
 ##
 
-def connected_callback(client):
-    logger.debug("CALLBACK: {} connected".format(client.name))
-    if client == apache:
-        client.send("GET /\n")
-    else:
-        client.send("Hello {}\n".format(client.name))
+def listening_callback(server):
+    logger.debug("CALLBACK: {} listening".format(server.name))
 
-def disconnected_callback(client):
-    logger.debug("CALLBACK: {} disconnected".format(client.name))
+def incoming_connection_callback(server,client):
+    logger.debug("CALLBACK: incoming connection on {} from {}".format(server.name, client[0]))
 
-def receive_callback(client, data):
-    logger.debug("CALLBACK: received from {}: {}".format(client.name,data))
+def disconnected_callback(server,client):
+    logger.debug("CALLBACK: {} disconnected".format(client))
 
-server = Network.tcp_server(port=80)
-#server.set_callbacks(connected=connected_callback, disconnected=disconnected_callback, data_received=receive_callback)
+def receive_callback(server, client, data):
+    logger.debug("CALLBACK: received from {}: {}".format(client,data))
+
+server = Network.tcp_server(port=5555,name='TEST')
+server.set_callbacks(   listening=listening_callback, 
+                        incoming_connection=incoming_connection_callback,
+                        disconnected=disconnected_callback,
+                        data_received=receive_callback)
 server.start()
 
 

@@ -35,6 +35,7 @@ import socket
 import threading
 import time
 import urllib3
+import queue
 
 
 class Network(object):
@@ -181,26 +182,26 @@ class Network(object):
 
 
 class tcp_client(object):
+    """ Initializes a new instance of tcp_client
+
+    :param host: Remote host name or ip address (v4 or v6)
+    :param port: Remote host port to connect to
+    :param name: Name of this connection (mainly for logging purposes)
+    :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
+    :param connect_retries: Number of connect retries per cycle
+    :param connect_cycle: Time between retries inside a connect cycle
+    :param retry_cycle: Time between cycles if :param:autoreconnect is True
+
+    :type host: str
+    :type port: int
+    :type name: str
+    :type name: bool
+    :type connect_retries: int
+    :type connect_cycle: int
+    :type retry_cycle: int
+    """
 
     def __init__(self, host, port, name=None, autoreconnect=True, connect_retries=5, connect_cycle=5, retry_cycle=30):
-        """ Initializes a new instance of tcp_client
-
-        :param host: Remote host name or ip address (v4 or v6)
-        :param port: Remote host port to connect to
-        :param name: Name of this connection (mainly for logging purposes)
-        :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
-        :param connect_retries: Number of connect retries per cycle
-        :param connect_cycle: Time between retries inside a connect cycle
-        :param retry_cycle: Time between cycles if :param:autoreconnect is True
-
-        :type host: str
-        :type port: int
-        :type name: str
-        :type name: bool
-        :type connect_retries: int
-        :type connect_cycle: int
-        :type retry_cycle: int
-        """
         self.logger = logging.getLogger(__name__)
 
         # Public properties
@@ -339,7 +340,7 @@ class tcp_client(object):
                     try:
                         self.__connect_threadlock.release()
                         self._connected_callback and self._connected_callback(self)
-                        self.__receive_thread = threading.Thread(target=self._receive_thread_worker, name='TCP_Receive')
+                        self.__receive_thread = threading.Thread(target=self.__receive_thread_worker, name='TCP_Receive')
                         self.__receive_thread.daemon = True
                         self.__receive_thread.start()
                     except:
@@ -374,7 +375,7 @@ class tcp_client(object):
             self._connect_counter += 1
             self.logger.warning("TCP connection to {}:{} failed with error {}. Counter: {}/{}".format(self._host, self._port, err, self._connect_counter, self._connect_retries))
 
-    def _receive_thread_worker(self):
+    def __receive_thread_worker(self):
         poller = select.poll()
         poller.register(self._socket, select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
 
@@ -414,26 +415,26 @@ class tcp_client(object):
 
 
 class tcp_server(object):
+    """ Initializes a new instance of tcp_server
+
+    :param interface: Remote interface name or ip address (v4 or v6)
+    :param port: Remote interface port to connect to
+    :param name: Name of this connection (mainly for logging purposes)
+    :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
+    :param connect_retries: Number of connect retries per cycle
+    :param connect_cycle: Time between retries inside a connect cycle
+    :param retry_cycle: Time between cycles if :param:autoreconnect is True
+
+    :type interface: str
+    :type port: int
+    :type name: str
+    :type name: bool
+    :type connect_retries: int
+    :type connect_cycle: int
+    :type retry_cycle: int
+    """
 
     def __init__(self, port, interface='::', name=None):
-        """ Initializes a new instance of tcp_client
-
-        :param interface: Remote interface name or ip address (v4 or v6)
-        :param port: Remote interface port to connect to
-        :param name: Name of this connection (mainly for logging purposes)
-        :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
-        :param connect_retries: Number of connect retries per cycle
-        :param connect_cycle: Time between retries inside a connect cycle
-        :param retry_cycle: Time between cycles if :param:autoreconnect is True
-
-        :type interface: str
-        :type port: int
-        :type name: str
-        :type name: bool
-        :type connect_retries: int
-        :type connect_cycle: int
-        :type retry_cycle: int
-        """
         self.logger = logging.getLogger(__name__)
 
         # Public properties
@@ -449,15 +450,18 @@ class tcp_server(object):
         self._ipver = socket.AF_INET
         self._socket = None
 
-        self._connected_callback = None
-        self._disconnected_callback = None
+        self._listening_callback = None
+        self._incoming_connection_callback = None
         self._data_received_callback = None
 
         # "Secret" properties
-        self.__connect_thread = None
-        self.__connect_threadlock = threading.Lock()
-        self.__receive_thread = None
-        self.__receive_threadlock = threading.Lock()
+        self.__listening_thread = None
+        self.__listening_threadlock = threading.Lock()
+        self.__connection_thread = None
+        self.__connection_threadlock = threading.Lock()
+        self.__connection_poller = None
+        self.__message_queues = {}
+        self.__connection_map = {}
         self.__running = True
 
         # Test if host is an ip address or a host name
@@ -502,7 +506,7 @@ class tcp_server(object):
     def name(self, name):
         self.__name = name
 
-    def set_callbacks(self, connected=None, data_received=None, disconnected=None):
+    def set_callbacks(self, listening=None, incoming_connection=None, disconnected=None, data_received=None):
         """ Set callbacks to caller for different socket events
 
         :param connected: Called whenever a connection is established successfully
@@ -513,9 +517,10 @@ class tcp_server(object):
         :type data_received: function
         :type disconnected: function
         """
-        self._connected_callback = connected
-        self._disconnected_callback = disconnected
+        self._listening_callback = listening
+        self._incoming_connection_callback = incoming_connection
         self._data_received_callback = data_received
+        self._disconnected_callback = disconnected
 
     def start(self):
         """ Start the server socket
@@ -535,20 +540,80 @@ class tcp_server(object):
             self._is_listening = False
             return False
         else:
-            self.logger.info("Bound to interface {} on port {}".format(self._interfaceip, self._port))
+            self.logger.debug("Bound to interface {} on port {}".format(self._interfaceip, self._port))
             #self._poller.register_server(self.socket.fileno(), self)
         
         try:
             self._socket.listen(5)   
             self._socket.setblocking(0)
+            self.logger.info("Listening on interface {} port {}".format(self._interfaceip, self._port))
         except Exception as e:
             self.logger.error("Problem starting listening to interface {} on port {}: {}".format(self._interfaceip, self._port, e))
             self._is_listening = False
             return False
 
         self._is_listening = True
+        self._listening_callback and self._listening_callback(self)
+        self.__listening_thread = threading.Thread(target=self.__listening_thread_worker, name='TCP_Listener')
+        self.__listening_thread.daemon = True
+        self.__listening_thread.start()
         return True   
 
+    def __listening_thread_worker(self):
+        poller = select.poll()
+        poller.register(self._socket, select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
+        self.logger.debug("Waiting for incomming commections on interface {} port {}".format(self._interfaceip, self._port))
+        while self.__running:
+            events = poller.poll(1000)
+            for fd, event in events:
+                if event & select.POLLERR:
+                    self.logger.debug("Listening thread  POLLERR")
+                if event & select.POLLHUP:
+                    self.logger.debug("Listening thread  POLLHUP")
+                if event & (select.POLLIN | select.POLLPRI):
+                    connection, address = self._socket.accept()
+                    connection.setblocking(0)
+                    self.logger.info("Incoming connection from {} on interface {} port {}".format(address[0], self._interfaceip, self._port))
+                    self._incoming_connection_callback and self._incoming_connection_callback(self, address)
+                    self.__connection_map[connection.fileno()] = connection
+                    self.__message_queues[connection] = queue.Queue()
+                    
+                    if self.__connection_thread is None:
+                        self.logger.debug("Connection thread not running yet, firing it up ...")
+                        self.__connection_thread = threading.Thread(target=self.__connection_thread_worker, name='TCP_Server')
+                        if self.__connection_poller is None:
+                            self.__connection_poller = select.poll()
+                        self.__connection_poller.register(connection, select.POLLOUT| select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
+                        self.__connection_thread.daemon = True
+                        self.__connection_thread.start()
+                    
+    def __connection_thread_worker(self):
+        self.logger.debug("Connection thread on interface {} port {} starting up".format(self._interfaceip, self._port))
+        while self.__running and len(self.__connection_map) > 0:
+            self.logger.debug("Connection thread  PING")
+            self._wait(1)
+            events = self.__connection_poller.poll(1000)
+            for fd, event in events:
+                if event & select.POLLERR:
+                    self.logger.debug("Connection thread  POLLERR")
+                if event & select.POLLHUP:
+                    self.logger.debug("Connection thread  POLLHUP")
+                if event & select.POLLOUT:
+                    self.logger.debug("Connection thread  POLLOUT")
+                if event & (select.POLLIN | select.POLLPRI):
+                    __socket = self.__connection_map[fd]
+                    msg = __socket.recv(4096)
+                    if msg:
+                        self._data_received_callback and self._data_received_callback(self, __socket.getpeername()[0], str.rstrip(str(msg, 'utf-8')))
+                    else:
+                        self.logger.debug("Connection closed for client {}".format(__socket.getpeername()))
+                        self._disconnected_callback and self._disconnected_callback(self, __socket.getpeername()[0])
+                        self.__connection_poller.unregister(fd)
+                        del self.__connection_map[fd]
+                    del __socket
+        self.__connection_poller = None
+        self.__connection_thread = None
+           
     def started(self):
         """ Returns the current connection state
 
@@ -564,9 +629,9 @@ class tcp_server(object):
             pass
 
     def close(self):
-        self.logger.info("Closing connection to {} on TCP port {}".format(self._interface, self._port))
+        self.logger.info("Shutting down listening socket on interface {} port {}".format(self._interface, self._port))
         self.__running = False
-        if self.__connect_thread is not None and self.__connect_thread.isAlive():
-            self.__connect_thread.join()
-        if self.__receive_thread is not None and self.__receive_thread.isAlive():
-            self.__receive_thread.join()
+        if self.__listening_thread is not None and self.__listening_thread.isAlive():
+            self.__listening_thread.join()
+        #if self.__receive_thread is not None and self.__receive_thread.isAlive():
+        #    self.__receive_thread.join()
