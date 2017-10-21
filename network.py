@@ -371,10 +371,10 @@ class tcp_client(object):
                     except:
                         raise
                     return True
-                self._wait(self._connect_cycle)
+                self._sleep(self._connect_cycle)
 
             if self._autoreconnect:
-                self._wait(self._retry_cycle)
+                self._sleep(self._retry_cycle)
                 self._connect_counter = 0
             else:
                 break
@@ -424,7 +424,7 @@ class tcp_client(object):
                             self.logger.debug("Autoreconnect enabled for {}".format(self._host))
                             self.connect()
 
-    def _wait(self, time_lapse):
+    def _sleep(self, time_lapse):
         time_start = time.time()
         time_end = (time_start + time_lapse)
         while self.__running and time_end > time.time():
@@ -706,13 +706,20 @@ class tcp_server(object):
             self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
         
 
-    def _wait(self, time_lapse):
+    def _sleep(self, time_lapse):
+        """ Non blocking sleep. Does return when self.close is called and running set to False.
+
+        :param time_lapse: Time in seconds to sleep
+        :type time_lapse: float
+        """
         time_start = time.time()
         time_end = (time_start + time_lapse)
         while self.__running and time_end > time.time():
             pass
 
     def close(self):
+        """ Closes running socket.
+        """
         self.logger.info("Shutting down listening socket on interface {} port {}".format(self._interface, self._port))
         self.__running = False
         if self.__listening_thread is not None and self.__listening_thread.isAlive():
