@@ -439,14 +439,16 @@ class tcp_client(object):
             self.__receive_thread.join()
 
 
-class Client(object):
-    def __init__(self, socket=None, fd=None):
+class _Client(object):
+    def __init__(self, server=None, socket=None, fd=None):
         self._fd = fd
+        self.__server = server
         self.__socket = socket
         self.__name = None
         self.__ip = None
         self.__port = None
         self.__ipver = None
+        self._data_received_callback = None
 
     @property
     def socket(self):
@@ -460,9 +462,25 @@ class Client(object):
     def name(self, name):
         self.__name = name
 
+    def set_callbacks(self, data_received=None):
+        """ Set callbacks for different socket events (client based)
+
+        :param data_received: Called when data is received
+
+        :type data_received: function
+        """
+        self._data_received_callback = data_received
+
+    def send(self, message):
+        self.__server.send(self, message)
+        
+    def close(self):
+        self.__socket.shutdown()
+
 
 class tcp_server(object):
-    """ Initializes a new instance of tcp_server
+    """ Initializes a new instance of tcp_server.
+        Default interface is '::' which listens on all IPv4 and all IPv6 addresses available.
 
     :param interface: Remote interface name or ip address (v4 or v6)
     :param port: Remote interface port to connect to
@@ -626,7 +644,7 @@ class tcp_server(object):
                     connection.setblocking(0)
                     fd = connection.fileno()
                     __peer_socket = Network.ip_port_to_socket(peer[0], peer[1])
-                    client = Client(socket=connection, fd=fd)
+                    client = _Client(server=self, socket=connection, fd=fd)
                     client.ip = peer[0]
                     client.ipver = socket.AF_INET6 if Network.is_ipv6(client.ip) else socket.AF_INET
                     client.port = peer[1]
@@ -668,6 +686,7 @@ class tcp_server(object):
                     if msg:
                         self.logger.debug("Received '{}' from {}".format(str.rstrip(str(msg, 'utf-8')), __client.name))
                         self._data_received_callback and self._data_received_callback(self, __client, str.rstrip(str(msg, 'utf-8')))
+                        __client._data_received_callback and __client._data_received_callback(self, __client, str.rstrip(str(msg, 'utf-8')))
                     else:
                         self.logger.info("Connection closed for client {}".format(__client.name))
                         self._disconnected_callback and self._disconnected_callback(self, __client)
@@ -704,7 +723,11 @@ class tcp_server(object):
                 self.logger.warning("Client {} found but has no valid message queue".format(client.name))
         else:
             self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
-        
+
+    def disconnect(self, client):
+        """ Disconnects a specific client
+        """
+        client.close()      
 
     def _sleep(self, time_lapse):
         """ Non blocking sleep. Does return when self.close is called and running set to False.
