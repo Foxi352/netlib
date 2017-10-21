@@ -32,13 +32,14 @@ def incoming_connection_callback(server,client):
     logger.debug("CALLBACK: incoming connection on {} from {}".format(server.name, client.name))
 
 def disconnected_callback(server,client):
-    logger.debug("CALLBACK: {} disconnected".format(client))
+    logger.debug("CALLBACK: {} disconnected".format(client.name))
 
 def receive_callback(server, client, data):
     logger.debug("CALLBACK: received from {}: {}".format(client.name,data))
-    server.send(client,'Ich bin hier !')
+    server.send(client,'Ich bin hier !\n')
 
-server = Network.tcp_server(port=5555,name='TEST')
+server = Network.tcp_server(port=5555)
+server.name = 'Test' # optional, can also be passed as parameter in init above or be left blank (default ip:port will be set by constructor)
 server.set_callbacks(   listening=listening_callback, 
                         incoming_connection=incoming_connection_callback,
                         disconnected=disconnected_callback,
