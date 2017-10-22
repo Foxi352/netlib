@@ -455,6 +455,10 @@ class _Client(object):
         return self.__socket
 
     @property
+    def fd(self):
+        return self._fd
+
+    @property
     def name(self):
         return self.__name
 
@@ -473,9 +477,12 @@ class _Client(object):
 
     def send(self, message):
         self.__server.send(self, message)
+
+    def send_bytes(self, message):
+        self.__server.send_bytes(self, message)
         
     def close(self):
-        self.__socket.shutdown()
+        self.__server.disconnect(self)
 
 
 class tcp_server(object):
@@ -679,20 +686,24 @@ class tcp_server(object):
                 if event & select.POLLOUT:
                     if fd in self.__message_queues and not self.__message_queues[fd].empty():
                         msg = self.__message_queues[fd].get_nowait()
-                        self.logger.debug("Sending '{}' to {}".format(str(msg, 'utf-8'), __client.name))
+                        try:
+                            string = str(msg, 'utf-8'),
+                            self.logger.debug("Sending '{}' to {}".format(string, __client.name))
+                        except:
+                            self.logger.debug("Sending undecodable bytes to {}".format(__client.name))
                         __socket.send(msg)
                 if event & (select.POLLIN | select.POLLPRI):
                     msg = __socket.recv(4096)
                     if msg:
-                        self.logger.debug("Received '{}' from {}".format(str.rstrip(str(msg, 'utf-8')), __client.name))
-                        self._data_received_callback and self._data_received_callback(self, __client, str.rstrip(str(msg, 'utf-8')))
-                        __client._data_received_callback and __client._data_received_callback(self, __client, str.rstrip(str(msg, 'utf-8')))
+                        try:
+                            string = str.rstrip(str(msg, 'utf-8'))
+                            self.logger.debug("Received '{}' from {}".format(string, __client.name))
+                            self._data_received_callback and self._data_received_callback(self, __client, string)
+                            __client._data_received_callback and __client._data_received_callback(self, __client, string)
+                        except:
+                            self.logger.debug("Received undecodable bytes from {}".format(__client.name))
                     else:
-                        self.logger.info("Connection closed for client {}".format(__client.name))
-                        self._disconnected_callback and self._disconnected_callback(self, __client)
-                        self.__connection_poller.unregister(fd)
-                        del self.__connection_map[fd]
-                        del self.__message_queues[fd]
+                        pass
                 del __socket
                 del __client
         self.__connection_poller = None
@@ -724,10 +735,33 @@ class tcp_server(object):
         else:
             self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
 
+    def send_bytes(self, client, msg):
+        """ Send message to connected client
+
+        :param client: Client Object to send message to
+        :param msg: Message to send
+
+        :type client: network.Client
+        :type msg: string
+        """
+        if client._fd in self.__connection_map:
+            if client._fd in self.__message_queues:
+                self.__message_queues[client._fd].put_nowait(msg)
+            else:
+                self.logger.warning("Client {} found but has no valid message queue".format(client.name))
+        else:
+            self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
+
     def disconnect(self, client):
         """ Disconnects a specific client
         """
-        client.close()      
+        client.socket.shutdown(socket.SHUT_RDWR)
+        self.logger.info("Connection closed for client {}".format(client.name))
+        self._disconnected_callback and self._disconnected_callback(self, client)
+        self.__connection_poller.unregister(client.fd)
+        del self.__connection_map[client.fd]
+        del self.__message_queues[client.fd]
+        client.socket.close()
 
     def _sleep(self, time_lapse):
         """ Non blocking sleep. Does return when self.close is called and running set to False.
