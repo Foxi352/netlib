@@ -191,7 +191,7 @@ class Network(object):
         """
         if Network.is_ipv6(ip):
             ip = '[{}]'.format(ip)
-        return '{}:{}'.format(ip,port)
+        return '{}:{}'.format(ip, port)
 
     @staticmethod
     def ipver_to_string(ipver):
@@ -205,6 +205,7 @@ class Network(object):
         :rtype: string
         """
         return 'IPv6' if ipver == socket.AF_INET6 else 'IPv4'
+
 
 class tcp_client(object):
     """ Initializes a new instance of tcp_client
@@ -276,9 +277,9 @@ class tcp_client(object):
             try:
                 self._ipver, sockettype, proto, canonname, socketaddr = socket.getaddrinfo(host, None)[0]
                 # Check if resolved address is IPv4 or IPv6
-                if self._ipver == socket.AF_INET: # is IPv4
+                if self._ipver == socket.AF_INET:  # is IPv4
                     self._hostip, port = socketaddr
-                elif self._ipver == socket.AF_INET6: # is IPv6
+                elif self._ipver == socket.AF_INET6:  # is IPv6
                     self._hostip, port, flow_info, scope_id = socketaddr
                 else:
                     # This should never happen
@@ -321,11 +322,11 @@ class tcp_client(object):
         :return: False if an error prevented us from launching a connection thread. True if a connection thread has been started.
         :rtype: bool
         """
-        if self._hostip is None: # return False if no valid ip to connect to
+        if self._hostip is None:  # return False if no valid ip to connect to
             self.logger.error("No valid IP address to connect to {}".format(self._host))
             self._is_connected = False
             return False
-        if self._is_connected: # return false if already connected
+        if self._is_connected:  # return false if already connected
             self.logger.error("Already connected to {}, ignoring new request".format(self._host))
             return False
 
@@ -480,7 +481,7 @@ class _Client(object):
 
     def send_bytes(self, message):
         self.__server.send_bytes(self, message)
-        
+
     def close(self):
         self.__server.disconnect(self)
 
@@ -551,15 +552,13 @@ class tcp_server(object):
             try:
                 self._ipver, sockettype, proto, canonname, socketaddr = socket.getaddrinfo(self._interface, None)[0]
                 # Check if resolved address is IPv4 or IPv6
-                if self._ipver == socket.AF_INET: # is IPv4
+                if self._ipver == socket.AF_INET:
                     self._interfaceip, port = socketaddr
-                elif self._ipver == socket.AF_INET6: # is IPv6
+                elif self._ipver == socket.AF_INET6:
                     self._interfaceip, port, flow_info, scope_id = socketaddr
                 else:
-                    # This should never happen
                     self.logger.error("Unknown ip address family {}".format(self._ipver))
                     self._interfaceip = None
-                # Print ip address on successfull resolve
                 if self._interfaceip is not None:
                     self.logger.info("Resolved {} to {} address {}".format(self._interface, ipver_to_string(self._ipver), self._hostip))
             except:
@@ -571,9 +570,8 @@ class tcp_server(object):
         self.__our_socket = Network.ip_port_to_socket(self._interfaceip, self._port)
         if not self.name:
             self.name = self.__our_socket
-            
         self.logger.info("Initializing TCP server socket {}".format(self.__our_socket))
-        
+
     @property
     def name(self):
         return self.__name
@@ -605,9 +603,8 @@ class tcp_server(object):
         :rtype: bool
         """
         if self._is_listening:
-            return       
+            return
         try:
-            
             self._socket = socket.socket(self._ipver, socket.SOCK_STREAM)
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._socket.bind((self._interfaceip, self._port))
@@ -617,10 +614,9 @@ class tcp_server(object):
             return False
         else:
             self.logger.debug("Bound listening socket to interface {} on port {}".format(self._interfaceip, self._port))
-            #self._poller.register_server(self.socket.fileno(), self)
-        
+
         try:
-            self._socket.listen(5)   
+            self._socket.listen(5)
             self._socket.setblocking(0)
             self.logger.info("Listening on socket {}".format(self.__our_socket))
         except Exception as e:
@@ -660,21 +656,20 @@ class tcp_server(object):
                     self.__connection_map[fd] = client
                     self.__message_queues[fd] = queue.Queue()
                     self._incoming_connection_callback and self._incoming_connection_callback(self, client)
-                    
+
                     if self.__connection_thread is None:
                         self.logger.debug("Connection thread not running yet, firing it up ...")
                         self.__connection_thread = threading.Thread(target=self.__connection_thread_worker, name='TCP_Server')
                     if self.__connection_poller is None:
                         self.__connection_poller = select.poll()
-                    self.__connection_poller.register(connection, select.POLLOUT| select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
+                    self.__connection_poller.register(connection, select.POLLOUT | select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
                     if not self.__connection_thread.isAlive():
                         self.__connection_thread.daemon = True
                         self.__connection_thread.start()
-                    
+
     def __connection_thread_worker(self):
         self.logger.debug("Connection thread on socket {} starting up".format(self.__our_socket))
         while self.__running and len(self.__connection_map) > 0:
-            #self.logger.debug("Connection thread  PING {}".format(len(self.__connection_map)))
             events = self.__connection_poller.poll(1000)
             for fd, event in events:
                 __client = self.__connection_map[fd]
@@ -709,17 +704,17 @@ class tcp_server(object):
         self.__connection_poller = None
         self.__connection_thread = None
         self.logger.debug("Last connection closed for socket {}, stopping connection thread".format(self.__our_socket))
-           
+
     def started(self):
         """ Returns the current connection state
 
-        :return: True if an active connection exists,else False.
+        :return: True if an active connection exists, else False.
         :rtype: bool
         """
         return self._is_started
 
     def send(self, client, msg):
-        """ Send message to connected client
+        """ Send a string to connected client
 
         :param client: Client Object to send message to
         :param msg: Message to send
@@ -736,13 +731,13 @@ class tcp_server(object):
             self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
 
     def send_bytes(self, client, msg):
-        """ Send message to connected client
+        """ Send a bytearray to connected client
 
         :param client: Client Object to send message to
-        :param msg: Message to send
+        :param msg: Bytearray to send
 
         :type client: network.Client
-        :type msg: string
+        :type msg: bytes
         """
         if client._fd in self.__connection_map:
             if client._fd in self.__message_queues:
