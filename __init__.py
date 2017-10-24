@@ -139,7 +139,7 @@ class CLIHandler(object):
         """
         try:
             #self.socket.settimeout(2)
-            self.__client.send_bytes(bytearray([0xFF, 0xFB, 0x01]))  # IAC WILL ECHO
+            self.__client.send(bytearray([0xFF, 0xFB, 0x01]))  # IAC WILL ECHO
             #data = self.socket.recv(3)
             #self.socket.setblocking(0)
             #if data != bytearray([0xFF, 0xFD, 0x01]):  # IAC DO ECHO
@@ -159,7 +159,7 @@ class CLIHandler(object):
         """
         try:
             #self.socket.settimeout(2)
-            self.__client.send_bytes(bytearray([0xFF, 0xFC, 0x01]))  # IAC WONT ECHO
+            self.__client.send(bytearray([0xFF, 0xFC, 0x01]))  # IAC WONT ECHO
             #data = self.socket.recv(3)
             #self.socket.setblocking(0)
             #if data != bytearray([0xFF, 0xFE, 0x01]):  # IAC DONT ECHO
@@ -222,7 +222,7 @@ class CLI(SmartPlugin):
         """
         Handle incoming connection
         """
-        CLIHandler(self.sh, client, client.name, self.updates_allowed, self.hashed_password, self.commands)
+        #CLIHandler(self.sh, client, client.name, self.updates_allowed, self.hashed_password, self.commands)
 
     def run(self):
         """

@@ -36,7 +36,7 @@ import threading
 import time
 import urllib3
 import queue
-
+import gc  # TODO: Remove, was just for refcount debug
 
 class Network(object):
 
@@ -442,14 +442,20 @@ class tcp_client(object):
 
 class _Client(object):
     def __init__(self, server=None, socket=None, fd=None):
+        self.logger = logging.getLogger(__name__)
+        self.name = None
+        self.ip = None
+        self.port = None
+        self.ipver = None
+        self._message_queue = queue.Queue()
+        self._data_received_callback = None
+        self._close_callback = None
         self._fd = fd
         self.__server = server
         self.__socket = socket
-        self.__name = None
-        self.__ip = None
-        self.__port = None
-        self.__ipver = None
-        self._data_received_callback = None
+
+    def __del__(self):
+        self.logger.debug("Client object released")
 
     @property
     def socket(self):
@@ -459,31 +465,58 @@ class _Client(object):
     def fd(self):
         return self._fd
 
-    @property
-    def name(self):
-        return self.__name
-
-    @name.setter
-    def name(self, name):
-        self.__name = name
-
-    def set_callbacks(self, data_received=None):
+    def set_callbacks(self, data_received=None, closed=None):
         """ Set callbacks for different socket events (client based)
 
         :param data_received: Called when data is received
-
         :type data_received: function
         """
         self._data_received_callback = data_received
+        self._close_callback = closed
 
     def send(self, message):
-        self.__server.send(self, message)
+        """ Send a string to connected client
 
-    def send_bytes(self, message):
-        self.__server.send_bytes(self, message)
+        :param msg: Message to send
+        :type msg: string | bytes | bytearray
 
+        :return: True if message has been queued successfully.
+        :rtype: bool
+        """
+        if not isinstance(message, (bytes, bytearray)):
+            try:
+                message = message.encode('utf-8')
+            except:
+                self.logger.warning("Error encoding message for client {}".format(self.name))
+                return False
+        try:
+            self._message_queue.put_nowait(message)
+        except:
+            self.logger.warning("Error queueing message for client {}".format(self.name))
+            return False
+        return True
+ 
     def close(self):
-        self.__server.disconnect(self)
+        self._process_queue()  # Be sure that possible remaining messages will be processed
+        self.__socket.shutdown(socket.SHUT_RDWR)
+        self.logger.info("Closing connection for client {}".format(self.name))
+        self._close_callback and self._close_callback(self)
+        self.set_callbacks(data_received=None, closed=None)
+        del self.__message_queue
+        self.__socket.close()
+        return True
+
+    def _process_queue(self):
+        while not self._message_queue.empty():
+            msg = self._message_queue.get_nowait()
+            try:
+                string = str(msg, 'utf-8'),
+                self.logger.debug("Sending '{}' to {}".format(string, self.name))
+            except:
+                self.logger.debug("Sending undecodable bytes to {}".format(self.name))
+            self.__socket.send(msg)
+            self._message_queue.task_done()
+        return True
 
 
 class tcp_server(object):
@@ -654,7 +687,6 @@ class tcp_server(object):
                     client.name = Network.ip_port_to_socket(client.ip, client.port)
                     self.logger.info("Incoming connection from {} on socket {}".format(__peer_socket, self.__our_socket))
                     self.__connection_map[fd] = client
-                    self.__message_queues[fd] = queue.Queue()
                     self._incoming_connection_callback and self._incoming_connection_callback(self, client)
 
                     if self.__connection_thread is None:
@@ -666,6 +698,7 @@ class tcp_server(object):
                     if not self.__connection_thread.isAlive():
                         self.__connection_thread.daemon = True
                         self.__connection_thread.start()
+                    del client
 
     def __connection_thread_worker(self):
         self.logger.debug("Connection thread on socket {} starting up".format(self.__our_socket))
@@ -679,14 +712,8 @@ class tcp_server(object):
                 if event & select.POLLHUP:
                     self.logger.debug("Connection thread  POLLHUP")
                 if event & select.POLLOUT:
-                    if fd in self.__message_queues and not self.__message_queues[fd].empty():
-                        msg = self.__message_queues[fd].get_nowait()
-                        try:
-                            string = str(msg, 'utf-8'),
-                            self.logger.debug("Sending '{}' to {}".format(string, __client.name))
-                        except:
-                            self.logger.debug("Sending undecodable bytes to {}".format(__client.name))
-                        __socket.send(msg)
+                    if not __client._message_queue.empty():
+                        __client._process_queue()
                 if event & (select.POLLIN | select.POLLPRI):
                     msg = __socket.recv(4096)
                     if msg:
@@ -698,7 +725,7 @@ class tcp_server(object):
                         except:
                             self.logger.debug("Received undecodable bytes from {}".format(__client.name))
                     else:
-                        pass
+                        self._remove_client(__client)
                 del __socket
                 del __client
         self.__connection_poller = None
@@ -720,43 +747,28 @@ class tcp_server(object):
         :param msg: Message to send
 
         :type client: network.Client
-        :type msg: string
+        :type msg: string | bytes | bytearray
+
+        :return: True if message has been queued successfully.
+        :rtype: bool
         """
-        if client._fd in self.__connection_map:
-            if client._fd in self.__message_queues:
-                self.__message_queues[client._fd].put_nowait(msg.encode('utf-8'))
-            else:
-                self.logger.warning("Client {} found but has no valid message queue".format(client.name))
-        else:
-            self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
-
-    def send_bytes(self, client, msg):
-        """ Send a bytearray to connected client
-
-        :param client: Client Object to send message to
-        :param msg: Bytearray to send
-
-        :type client: network.Client
-        :type msg: bytes
-        """
-        if client._fd in self.__connection_map:
-            if client._fd in self.__message_queues:
-                self.__message_queues[client._fd].put_nowait(msg)
-            else:
-                self.logger.warning("Client {} found but has no valid message queue".format(client.name))
-        else:
-            self.logger.warning("No connection to {}, cannot send data {}".format(client.name, msg))
+        return client.send(msg)
 
     def disconnect(self, client):
         """ Disconnects a specific client
+
+        :param client: Client Object to disconnect
+        :type client: network.Client
         """
-        client.socket.shutdown(socket.SHUT_RDWR)
+        client.close()
+        return True
+
+    def _remove_client(self, client):
         self.logger.info("Connection closed for client {}".format(client.name))
         self._disconnected_callback and self._disconnected_callback(self, client)
         self.__connection_poller.unregister(client.fd)
         del self.__connection_map[client.fd]
-        del self.__message_queues[client.fd]
-        client.socket.close()
+        return True
 
     def _sleep(self, time_lapse):
         """ Non blocking sleep. Does return when self.close is called and running set to False.
