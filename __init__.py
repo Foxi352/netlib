@@ -119,7 +119,7 @@ class CLIHandler(object):
         """
         Push 'echo off' and password prompt to client.
         """
-        self.__echo_off()
+        self.__client.send_echo_off()
         self.push("Password: ")
         self.__prompt_type = 'password'
 
@@ -128,48 +128,8 @@ class CLIHandler(object):
         Push 'echo on' and newline to client
         :return:
         """
-        self.__echo_on()
+        self.__client.send_echo_on()
         self.push("\n")
-
-    def __echo_off(self):
-        """
-        Send 'IAC WILL ECHO' to client, telling the client that we will echo.
-        Check that reply is 'IAC DO ECHO', meaning that the client has understood.
-        As we are not echoing entered text will be invisible
-        """
-        try:
-            #self.socket.settimeout(2)
-            self.__client.send(bytearray([0xFF, 0xFB, 0x01]))  # IAC WILL ECHO
-            #data = self.socket.recv(3)
-            #self.socket.setblocking(0)
-            #if data != bytearray([0xFF, 0xFD, 0x01]):  # IAC DO ECHO
-            #    self.logger.error("Error at 'echo off': Sent b'\\xff\\xfb\\x01 , Expected reply b'\\xff\\xfd\\x01, received {0}".format(data))
-            #    self.push("'echo off' failed. Bye")
-            #    self.close()
-        except Exception as e:
-            self.push("\nException at 'echo off'. See log for details.")
-            self.logger.exception(e)
-            self.close()
-
-    def __echo_on(self):
-        """
-        Send 'IAC WONT ECHO' to client, telling the client that we wont echo.
-        Check that reply is 'IAC DONT ECHO', meaning that the client has understood.
-        Now the client should be echoing and we do not have to care about this
-        """
-        try:
-            #self.socket.settimeout(2)
-            self.__client.send(bytearray([0xFF, 0xFC, 0x01]))  # IAC WONT ECHO
-            #data = self.socket.recv(3)
-            #self.socket.setblocking(0)
-            #if data != bytearray([0xFF, 0xFE, 0x01]):  # IAC DONT ECHO
-            #    self.logger.error("Error at 'echo on': Sent b'\\xff\\xfc\\x01 , Expected reply b'\\xff\\xfe\\x01, received {0}".format(data))
-            #    self.push("'echo off' failed. Bye")
-            #    self.close()
-        except Exception as e:
-            self.push("\nException at 'echo on'. See log for details.")
-            self.logger.exception(e)
-            self.close()
 
     def __push_command_prompt(self):
         """Push command prompt to client"""
@@ -218,12 +178,6 @@ class CLI(SmartPlugin):
         self.logger.debug("Incoming connection from {}".format(client.name))
         CLIHandler(self.sh, client, client.name, self.updates_allowed, self.hashed_password, self.commands)
  
-    def data_received(self, server, client, message):
-        """
-        Handle incoming connection
-        """
-        #CLIHandler(self.sh, client, client.name, self.updates_allowed, self.hashed_password, self.commands)
-
     def run(self):
         """
         Called by SmartHomeNG to start plugin

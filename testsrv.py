@@ -21,15 +21,16 @@ logger.setLevel(logging.DEBUG)
 
 logger.debug("Server test started")
 
-##
-## Example calls and tests start below
-##
 
+##
+## Callbacks for server (listener)
+##
 def listening_callback(server):
     logger.debug("CALLBACK: {} listening".format(server.name))
 
 def incoming_connection_callback(server,client):
     logger.debug("CALLBACK: incoming connection on {} from {}".format(server.name, client.name))
+    client.set_callbacks(will_close=client_will_close)
 
 def disconnected_callback(server,client):
     logger.debug("CALLBACK: {} disconnected".format(client.name))
@@ -38,6 +39,15 @@ def receive_callback(server, client, data):
     logger.debug("CALLBACK: received from {}: {}".format(client.name,data))
     server.send(client,'Ich bin hier !\n')
 
+##
+## Callbacks for clients
+##
+def client_will_close(client):
+    logger.debug("CLIENT CALLBACK: Client {} will close".format(client.name))
+
+##
+## Example calls and tests start below
+##
 server = Network.tcp_server(port=5555)
 server.name = 'Test' # optional, can also be passed as parameter in init above or be left blank (default ip:port will be set by constructor)
 server.set_callbacks(   listening=listening_callback, 

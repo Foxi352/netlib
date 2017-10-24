@@ -13,18 +13,6 @@ def signal_handler(signal, frame):
     logger.debug('You pressed Ctrl+C!')
     running = False
 
-signal.signal(signal.SIGINT, signal_handler)
-
-logging.basicConfig(format='%(asctime)s %(levelname)-8s %(module)-12s %(threadName)-12s %(message)s -- %(filename)s:%(funcName)s:%(lineno)d', datefmt='%Y-%m-%d %H:%M:%S')
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-logger.debug("Test started")
-
-##
-## Example calls and tests start below
-##
-
 def connected_callback(client):
     logger.debug("CALLBACK: {} connected".format(client.name))
     if client == apache:
@@ -37,6 +25,14 @@ def disconnected_callback(client):
 
 def receive_callback(client, data):
     logger.debug("CALLBACK: received from {}: {}".format(client.name,data))
+
+signal.signal(signal.SIGINT, signal_handler)
+
+logging.basicConfig(format='%(asctime)s %(levelname)-8s %(module)-12s %(threadName)-12s %(message)s -- %(filename)s:%(funcName)s:%(lineno)d', datefmt='%Y-%m-%d %H:%M:%S')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+logger.debug("Test started")
 
 apache = Network.tcp_client(name='Apache', host='192.168.1.5', port=80, autoreconnect=False, connect_cycle=1, retry_cycle=5)
 apache.set_callbacks(connected=connected_callback, disconnected=disconnected_callback, data_received=receive_callback)

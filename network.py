@@ -24,6 +24,8 @@
 This library contains the Network class for SmartHomeNG.
 
 New network functions are going to be implemented in this library.
+This classes, functions and methods are mainly meant to be used by plugin developers
+This is work in progress and interfaces may be subject to modifications
 
 """
 
@@ -36,7 +38,6 @@ import threading
 import time
 import urllib3
 import queue
-import gc  # TODO: Remove, was just for refcount debug
 
 class Network(object):
 
@@ -145,15 +146,15 @@ class Network(object):
     @staticmethod
     def get_local_ipv4_address():
         """
-        Get's local ipv4 address
-        TODO: What if more than one interface present ?
+        Get's local ipv4 address of the interface with the default gateway. 
+        Return '127.0.0.1' if no suitable interface is found
 
         :return: IPv4 address as a string
         :rtype: string
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            s.connect(('10.255.255.255', 1))
+            s.connect(('8.8.8.8', 1))
             IP = s.getsockname()[0]
         except:
             IP = '127.0.0.1'
@@ -164,8 +165,8 @@ class Network(object):
     @staticmethod
     def get_local_ipv6_address():
         """
-        Get's local ipv6 address
-        TODO: What if more than one interface present ?
+        Get's local ipv6 address of the interface with the default gateway. 
+        Return '::1' if no suitable interface is found
 
         :return: IPv6 address as a string
         :rtype: string
@@ -213,7 +214,7 @@ class tcp_client(object):
     :param host: Remote host name or ip address (v4 or v6)
     :param port: Remote host port to connect to
     :param name: Name of this connection (mainly for logging purposes)
-    :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
+    :param autoreconnect: Should the socket try to reconnect on lost connection (or finished connect cycle)
     :param connect_retries: Number of connect retries per cycle
     :param connect_cycle: Time between retries inside a connect cycle
     :param retry_cycle: Time between cycles if :param:autoreconnect is True
@@ -221,7 +222,7 @@ class tcp_client(object):
     :type host: str
     :type port: int
     :type name: str
-    :type name: bool
+    :type autoreconnect: bool
     :type connect_retries: int
     :type connect_cycle: int
     :type retry_cycle: int
@@ -441,6 +442,16 @@ class tcp_client(object):
 
 
 class _Client(object):
+    """ Client object that represents a connected client of tcp_server
+
+    :param server: The tcp_server passes a reference to itself to access parent methods
+    :param socket: socket.Socket class used by the Client object
+    :param fd: File descriptor of socket used by the Client object
+
+    :type server: tcp_server
+    :type socket: function
+    :type fd: int
+    """
     def __init__(self, server=None, socket=None, fd=None):
         self.logger = logging.getLogger(__name__)
         self.name = None
@@ -449,13 +460,10 @@ class _Client(object):
         self.ipver = None
         self._message_queue = queue.Queue()
         self._data_received_callback = None
-        self._close_callback = None
+        self._will_close_callback = None
         self._fd = fd
         self.__server = server
         self.__socket = socket
-
-    def __del__(self):
-        self.logger.debug("Client object released")
 
     @property
     def socket(self):
@@ -465,14 +473,14 @@ class _Client(object):
     def fd(self):
         return self._fd
 
-    def set_callbacks(self, data_received=None, closed=None):
+    def set_callbacks(self, data_received=None, will_close=None):
         """ Set callbacks for different socket events (client based)
 
         :param data_received: Called when data is received
         :type data_received: function
         """
         self._data_received_callback = data_received
-        self._close_callback = closed
+        self._will_close_callback = will_close
 
     def send(self, message):
         """ Send a string to connected client
@@ -495,16 +503,43 @@ class _Client(object):
             self.logger.warning("Error queueing message for client {}".format(self.name))
             return False
         return True
+
+    def send_echo_off(self):
+        command = bytearray([0xFF, 0xFB, 0x01])
+        string = self._iac_to_string(command)
+        self.logger.debug("Sending IAC telnet command: '{}'".format(string))
+        self.send(command)
+
+    def send_echo_on(self):
+        command = bytearray([0xFF, 0xFC, 0x01])
+        string = self._iac_to_string(command)
+        self.logger.debug("Sending IAC telnet command: '{}'".format(string))
+        self.send(command)
  
+    def process_IAC(self, msg):
+        string = self._iac_to_string(msg)
+        self.logger.debug("Received IAC telnet command: '{}'".format(string))
+        
     def close(self):
+        """ Client socket closes itself """
         self._process_queue()  # Be sure that possible remaining messages will be processed
         self.__socket.shutdown(socket.SHUT_RDWR)
         self.logger.info("Closing connection for client {}".format(self.name))
-        self._close_callback and self._close_callback(self)
-        self.set_callbacks(data_received=None, closed=None)
+        self._will_close_callback and self._will_close_callback(self)
+        self.set_callbacks(data_received=None, will_close=None)
         del self.__message_queue
         self.__socket.close()
         return True
+
+    def _iac_to_string(self, msg):
+        iac = {1:'ECHO', 251:'WILL', 252:'WON\'T',253:'DO', 254:'DON\'T', 255: 'IAC'}
+        string = ''
+        for char in msg:
+            if char in iac:
+                string += iac[char] + ' '
+            else:
+                string += '<UNKNOWN> '
+        return string.rstrip()        
 
     def _process_queue(self):
         while not self._message_queue.empty():
@@ -520,24 +555,17 @@ class _Client(object):
 
 
 class tcp_server(object):
-    """ Initializes a new instance of tcp_server.
-        Default interface is '::' which listens on all IPv4 and all IPv6 addresses available.
+    """ init(self, port, interface='::', name=None)
+    Initializes a new instance of tcp_server.
+    Default interface is '::' which listens on all IPv4 and all IPv6 addresses available.
 
     :param interface: Remote interface name or ip address (v4 or v6)
     :param port: Remote interface port to connect to
     :param name: Name of this connection (mainly for logging purposes)
-    :param name: Should the socket try to reconnect on lost connection (or finished connect cycle)
-    :param connect_retries: Number of connect retries per cycle
-    :param connect_cycle: Time between retries inside a connect cycle
-    :param retry_cycle: Time between cycles if :param:autoreconnect is True
 
     :type interface: str
     :type port: int
     :type name: str
-    :type name: bool
-    :type connect_retries: int
-    :type connect_cycle: int
-    :type retry_cycle: int
     """
 
     def __init__(self, port, interface='::', name=None):
@@ -701,6 +729,7 @@ class tcp_server(object):
                     del client
 
     def __connection_thread_worker(self):
+        """ This thread handles the send & receive tasks of connected clients. """
         self.logger.debug("Connection thread on socket {} starting up".format(self.__our_socket))
         while self.__running and len(self.__connection_map) > 0:
             events = self.__connection_poller.poll(1000)
@@ -724,6 +753,8 @@ class tcp_server(object):
                             __client._data_received_callback and __client._data_received_callback(self, __client, string)
                         except:
                             self.logger.debug("Received undecodable bytes from {}".format(__client.name))
+                            if msg[0] == 0xFF:
+                                __client.process_IAC(msg)
                     else:
                         self._remove_client(__client)
                 del __socket
@@ -732,13 +763,13 @@ class tcp_server(object):
         self.__connection_thread = None
         self.logger.debug("Last connection closed for socket {}, stopping connection thread".format(self.__our_socket))
 
-    def started(self):
-        """ Returns the current connection state
+    def listening(self):
+        """ Returns the current listening state
 
-        :return: True if an active connection exists, else False.
+        :return: True if the server socket is actually listening, else False.
         :rtype: bool
         """
-        return self._is_started
+        return self._is_listening
 
     def send(self, client, msg):
         """ Send a string to connected client
@@ -764,9 +795,10 @@ class tcp_server(object):
         return True
 
     def _remove_client(self, client):
-        self.logger.info("Connection closed for client {}".format(client.name))
+        self.logger.info("Lost connection to client {}, removing it".format(client.name))
         self._disconnected_callback and self._disconnected_callback(self, client)
         self.__connection_poller.unregister(client.fd)
+        #client.close()
         del self.__connection_map[client.fd]
         return True
 
@@ -782,8 +814,7 @@ class tcp_server(object):
             pass
 
     def close(self):
-        """ Closes running socket.
-        """
+        """ Closes running listening socket """
         self.logger.info("Shutting down listening socket on interface {} port {}".format(self._interface, self._port))
         self.__running = False
         if self.__listening_thread is not None and self.__listening_thread.isAlive():
