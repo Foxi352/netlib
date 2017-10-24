@@ -505,18 +505,21 @@ class _Client(object):
         return True
 
     def send_echo_off(self):
+        """ Sends an IAC telnet command to ask client to turn it's echo off """
         command = bytearray([0xFF, 0xFB, 0x01])
         string = self._iac_to_string(command)
         self.logger.debug("Sending IAC telnet command: '{}'".format(string))
         self.send(command)
 
     def send_echo_on(self):
+        """ Sends an IAC telnet command to ask client to turn it's echo on again """
         command = bytearray([0xFF, 0xFC, 0x01])
         string = self._iac_to_string(command)
         self.logger.debug("Sending IAC telnet command: '{}'".format(string))
         self.send(command)
  
     def process_IAC(self, msg):
+        """ Processes incomming IAC messages. Does nothing for now except logging them in clear text """
         string = self._iac_to_string(msg)
         self.logger.debug("Received IAC telnet command: '{}'".format(string))
         
