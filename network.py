@@ -32,11 +32,11 @@ This is work in progress and interfaces may be subject to modifications
 import logging
 import re
 import ipaddress
+import requests
 import select
 import socket
 import threading
 import time
-import urllib3
 import queue
 
 class Network(object):
@@ -208,7 +208,50 @@ class Network(object):
         return 'IPv6' if ipver == socket.AF_INET6 else 'IPv4'
 
 
-class tcp_client(object):
+class Http(object):
+    def __init__(self, baseurl=None):
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)  # TODO: Remove this in production
+        
+        self.baseurl = baseurl
+        self._response = None
+        self.timeout = 10
+
+    def get_json(self, url=None, params=None):
+        self.__get(url=url,params=params)
+        json = None
+        try:
+            json = self._response.json()
+        except:
+            self.logger.warning("Invalid JSON received from {} !".format(url if url else self.baseurl))
+        return json
+
+    def get_text(self, url=None, params=None, encoding=None):
+        self.__get(url=url,params=params)
+        if encoding:
+            self._response.encoding = encoding
+        return self._response.text
+
+    def get_binary(self, url=None, params=None):
+        self.__get(url=url,params=params)
+        return self._response.content
+
+    def response_status(self):
+        return self._response.status_code
+
+    def response_headers(self):
+        return self._response.headers
+
+    def response_cookies(self):
+        return self._response.cookies
+
+    def __get(self, url=None, params=None):
+        url = url if url else self.baseurl
+        self.logger.info("Sending GET request to {}".format(url))
+        self._response = requests.get(url, params=params, timeout=self.timeout)
+        self.logger.debug("Fetched URL {}".format(self._response.url))
+    
+class Tcp_client(object):
     """ Initializes a new instance of tcp_client
 
     :param host: Remote host name or ip address (v4 or v6)
@@ -557,7 +600,7 @@ class _Client(object):
         return True
 
 
-class tcp_server(object):
+class Tcp_server(object):
     """ init(self, port, interface='::', name=None)
     Initializes a new instance of tcp_server.
     Default interface is '::' which listens on all IPv4 and all IPv6 addresses available.
@@ -573,6 +616,7 @@ class tcp_server(object):
 
     def __init__(self, port, interface='::', name=None):
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)  # TODO: Remove this in production
 
         # Public properties
         self.name = name
@@ -630,7 +674,6 @@ class tcp_server(object):
                 self.logger.error("Cannot resolve {} to a valid ip address (v4 or v6)".format(self._interface))
                 self._interfaceip = None
 
-        self.logger.setLevel(logging.DEBUG)
         self.__our_socket = Network.ip_port_to_socket(self._interfaceip, self._port)
         if not self.name:
             self.name = self.__our_socket
