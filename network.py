@@ -218,6 +218,18 @@ class Http(object):
         self.timeout = 10
 
     def get_json(self, url=None, params=None):
+        """
+        Launches a GET reqeust and returns JSON answer as a dict or None on error.
+
+        :param url: Optional URL to getch from. If None (default) use baseurl given on init.
+        :param params: Optional dict of parameters to add to URL query string.
+ 
+        :type url: str
+        :type params: dict
+
+        :return: JSON answer decoded into a dict or None on whatever error occured
+        :rtype: dict | None
+        """
         self.__get(url=url,params=params)
         json = None
         try:
@@ -227,22 +239,67 @@ class Http(object):
         return json
 
     def get_text(self, url=None, params=None, encoding=None):
+        """
+        Launches a GET reqeust and returns answer as string or None on error.
+
+        :param url: Optional URL to getch from. Default is to use baseurl given to constructor.
+        :param params: Optional dict of parameters to add to URL query string.
+        :param encoding: Optional encoding of the received text. Default is to let the lib try to figure out the right encoding.
+ 
+        :type url: str
+        :type params: dict
+        :type encoding: str
+
+        :return: Answer decoded into a string or None on whatever error occured
+        :rtype: str | None
+        """
         self.__get(url=url,params=params)
         if encoding:
             self._response.encoding = encoding
         return self._response.text
 
     def get_binary(self, url=None, params=None):
+        """
+        Launches a GET reqeust and returns answer as raw binary data or None on error.
+        This is usefull for downloading binary objects / files.
+
+        :param url: Optional URL to getch from. Default is to use baseurl given to constructor.
+        :param params: Optional dict of parameters to add to URL query string.
+ 
+        :type url: str
+        :type params: dict
+
+        :return: Answer as raw binary objector None on whatever error occured
+        :rtype: bytes | None
+        """
         self.__get(url=url,params=params)
         return self._response.content
 
     def response_status(self):
+        """
+        Returns the status code (200, 404, ...) of the last executed request
+
+        :return: Status code of last request
+        :rtype: int
+        """
         return self._response.status_code
 
     def response_headers(self):
+        """
+        Returns a dictionary with the server return headers of the last executed request
+
+        :return: Headers returned by server
+        :rtype: dict
+        """
         return self._response.headers
 
     def response_cookies(self):
+        """
+        Returns a dictionary with the cookies the server may have sent on the last executed request
+
+        :return: Cookies returned by server
+        :rtype: dict
+        """
         return self._response.cookies
 
     def __get(self, url=None, params=None):
