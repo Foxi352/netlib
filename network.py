@@ -219,7 +219,7 @@ class Http(object):
 
     def get_json(self, url=None, params=None):
         """
-        Launches a GET reqeust and returns JSON answer as a dict or None on error.
+        Launches a GET request and returns JSON answer as a dict or None on error.
 
         :param url: Optional URL to getch from. If None (default) use baseurl given on init.
         :param params: Optional dict of parameters to add to URL query string.
@@ -238,9 +238,9 @@ class Http(object):
             self.logger.warning("Invalid JSON received from {} !".format(url if url else self.baseurl))
         return json
 
-    def get_text(self, url=None, params=None, encoding=None):
+    def get_text(self, url=None, params=None, encoding=None, timeout=None):
         """
-        Launches a GET reqeust and returns answer as string or None on error.
+        Launches a GET request and returns answer as string or None on error.
 
         :param url: Optional URL to getch from. Default is to use baseurl given to constructor.
         :param params: Optional dict of parameters to add to URL query string.
@@ -253,14 +253,19 @@ class Http(object):
         :return: Answer decoded into a string or None on whatever error occured
         :rtype: str | None
         """
-        self.__get(url=url,params=params)
-        if encoding:
-            self._response.encoding = encoding
-        return self._response.text
+        _text = None
+        if self.__get(url=url, params=params, timeout=timeout):
+            try:
+                if encoding:
+                    self._response.encoding = encoding
+                _text = self._response.text
+            except:
+                self.logger.error("Successfull GET, but decoding response failed. This should never happen !")
+        return _text
 
     def get_binary(self, url=None, params=None):
         """
-        Launches a GET reqeust and returns answer as raw binary data or None on error.
+        Launches a GET request and returns answer as raw binary data or None on error.
         This is usefull for downloading binary objects / files.
 
         :param url: Optional URL to getch from. Default is to use baseurl given to constructor.
@@ -277,12 +282,18 @@ class Http(object):
 
     def response_status(self):
         """
-        Returns the status code (200, 404, ...) of the last executed request
+        Returns the status code (200, 404, ...) of the last executed request.
+        If GET request was not possible and thus no HTTP statuscode is available the returned status code = 0.
 
-        :return: Status code of last request
-        :rtype: int
+        :return: Status code and text of last request
+        :rtype: (int, str)
         """
-        return self._response.status_code
+        try:
+            (code, reason) = (self._response.status_code, self._response.reason)
+        except:
+            code = 0
+            reason = 'Unable to complete GET request'
+        return (code, reason)
 
     def response_headers(self):
         """
@@ -302,11 +313,27 @@ class Http(object):
         """
         return self._response.cookies
 
-    def __get(self, url=None, params=None):
+    def response_object(self):
+        """
+        Returns the raw response object for advanced ussage. Use if you know what you are doing.
+        Maybe this lib can be extented to your needs instead ?
+
+        :return: Reponse object as returned by underlying requests library
+        :rtype: requests.Response
+        """
+        return self._response
+
+    def __get(self, url=None, params=None, timeout=None):
         url = url if url else self.baseurl
+        timeout = timeout if timeout else self.timeout
         self.logger.info("Sending GET request to {}".format(url))
-        self._response = requests.get(url, params=params, timeout=self.timeout)
-        self.logger.debug("Fetched URL {}".format(self._response.url))
+        try:
+            self._response = requests.get(url, params=params, timeout=timeout)
+            self.logger.debug("{} Fetched URL {}".format(self.response_status(), self._response.url))
+        except Exception as e:
+            self.logger.warning("Error sending GET request to {}: {}".format(url, e))
+            return False
+        return True
     
 class Tcp_client(object):
     """ Initializes a new instance of tcp_client
@@ -328,11 +355,12 @@ class Tcp_client(object):
     :type retry_cycle: int
     """
 
-    def __init__(self, host, port, name=None, autoreconnect=True, connect_retries=5, connect_cycle=5, retry_cycle=30):
+    def __init__(self, host, port, name=None, autoreconnect=True, connect_retries=5, connect_cycle=5, retry_cycle=30, binary=False):
         self.logger = logging.getLogger(__name__)
 
         # Public properties
         self.name = name
+        self.terminator = None
 
         # "Private" properties (__ not used on purpose)
         self._host = host
@@ -348,6 +376,7 @@ class Tcp_client(object):
         self._ipver = socket.AF_INET
         self._socket = None
         self._connect_counter = 0
+        self._binary = binary
 
         self._connected_callback = None
         self._disconnected_callback = None
@@ -394,14 +423,6 @@ class Tcp_client(object):
                 self.logger.error("Cannot resolve {} to a valid ip address (v4 or v6)".format(self._host))
                 self._hostip = None
 
-    @property
-    def name(self):
-        return self.__name
-
-    @name.setter
-    def name(self, name):
-        self.__name = name
-
     def set_callbacks(self, connected=None, data_received=None, disconnected=None):
         """ Set callbacks to caller for different socket events
 
@@ -444,11 +465,20 @@ class Tcp_client(object):
         """
         return self._is_connected
 
-    def send(self, msg):
-        if self._is_connected:
-            self._socket.send(msg.encode('utf-8'))
-        else:
+    def send(self, message):
+        if not isinstance(message, (bytes, bytearray)):
+            try:
+                message = message.encode('utf-8')
+            except:
+                self.logger.warning("Error encoding message for client {}".format(self.name))
+                return False
+        try:
+            if self._is_connected:
+                self._socket.send(message)
+        except:
             self.logger.warning("No connection to {}, cannot send data {}".format(self._host, msg))
+            return False
+        return True
 
     def _connect_thread_worker(self):
         if not self.__connect_threadlock.acquire(blocking=False):
@@ -505,17 +535,48 @@ class Tcp_client(object):
     def __receive_thread_worker(self):
         poller = select.poll()
         poller.register(self._socket, select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
+        __buffer = b''
 
         while self._is_connected and self.__running:
             events = poller.poll(1000)
             for fd, event in events:
                 if event & select.POLLHUP:
                     self.logger.warning("Client socket closed")
+                # Check if POLLIN event triggered
                 if event & (select.POLLIN | select.POLLPRI):
                     msg = self._socket.recv(4096)
+                    # Check if incoming message is not empty
                     if msg:
-                        if self._data_received_callback is not None:
-                            self._data_received_callback(self, str.rstrip(str(msg, 'utf-8')))
+                        # If we transfer in text mode decode message to string
+                        if not self._binary:
+                            msg = str.rstrip(str(msg, 'utf-8'))
+                        # If we work in line mode (with a terminator) slice buffer into single chunks based on terminator
+                        if self.terminator:
+                            #self.logger.debug("********** We search for a terminator")
+                            __buffer += msg
+                            while True:
+                                # terminator = int means fixed size chunks
+                                if isinstance(self.terminator, int):
+                                    i = self.terminator
+                                    #self.logger.debug("********** INT {} {}".format(i, len(__buffer)))
+                                    if i > len(__buffer):
+                                        break
+                                # terminator is str or bytes means search for it
+                                else:
+                                    i = __buffer.find(self.terminator)
+                                    if i == -1:
+                                        break
+                                    #self.logger.debug("********** FOUND")
+                                    i += len(self.terminator)
+                                line = __buffer[:i]
+                                __buffer = __buffer[i:]
+                                if self._data_received_callback is not None:
+                                    self._data_received_callback(self, line)
+                        # If not in terminator mode just forward what we received
+                        else:
+                            if self._data_received_callback is not None:
+                                self._data_received_callback(self, msg)
+                    # If empty peer has closed the connection
                     else:
                         # Peer connection closed
                         self.logger.warning("Connection closed by peer {}".format(self._host))
