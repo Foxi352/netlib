@@ -21,6 +21,10 @@
 #########################################################################
 
 """
+
+|  *** ATTENTION: This is early work in progress. Interfaces are subject to change. ***
+|  *** DO NOT USE IN PRODUCTION until you know what you are doing ***
+|  
 This library contains the Network class for SmartHomeNG.
 
 New network functions are going to be implemented in this library.
@@ -41,6 +45,7 @@ import queue
 
 
 class Network(object):
+    """ This Class has some usefull static methods that you can use in your projects """
 
     @staticmethod
     def is_mac(mac):
@@ -210,6 +215,12 @@ class Network(object):
 
 
 class Http(object):
+    """
+    Creates an instance of the Http class.
+
+    :param baseurl: base URL used everywhere in this instance (example: http://www.myserver.tld)
+    :type baseurl: str
+    """
     def __init__(self, baseurl=None):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)  # TODO: Remove this in production
@@ -338,7 +349,7 @@ class Http(object):
 
 
 class Tcp_client(object):
-    """ Creates a new instance of Tcp_client class
+    """ Creates a new instance of the Tcp_client class
 
     :param host: Remote host name or ip address (v4 or v6)
     :param port: Remote host port to connect to
@@ -730,11 +741,9 @@ class _Client(object):
 
 
 class Tcp_server(object):
-    """ init(self, port, interface='::', name=None)
-    Initializes a new instance of tcp_server.
-    Default interface is '::' which listens on all IPv4 and all IPv6 addresses available.
+    """ Creates a new instance of the Tcp_server class
 
-    :param interface: Remote interface name or ip address (v4 or v6)
+    :param interface: Remote interface name or ip address (v4 or v6). Default is '::' which listens on all IPv4 and all IPv6 addresses available.
     :param port: Remote interface port to connect to
     :param name: Name of this connection (mainly for logging purposes)
 
@@ -807,14 +816,6 @@ class Tcp_server(object):
         if not self.name:
             self.name = self.__our_socket
         self.logger.info("Initializing TCP server socket {}".format(self.__our_socket))
-
-    @property
-    def name(self):
-        return self.__name
-
-    @name.setter
-    def name(self, name):
-        self.__name = name
 
     def set_callbacks(self, listening=None, incoming_connection=None, disconnected=None, data_received=None):
         """ Set callbacks to caller for different socket events
