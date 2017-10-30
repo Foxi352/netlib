@@ -39,6 +39,7 @@ import threading
 import time
 import queue
 
+
 class Network(object):
 
     @staticmethod
@@ -146,7 +147,7 @@ class Network(object):
     @staticmethod
     def get_local_ipv4_address():
         """
-        Get's local ipv4 address of the interface with the default gateway. 
+        Get's local ipv4 address of the interface with the default gateway.
         Return '127.0.0.1' if no suitable interface is found
 
         :return: IPv4 address as a string
@@ -165,7 +166,7 @@ class Network(object):
     @staticmethod
     def get_local_ipv6_address():
         """
-        Get's local ipv6 address of the interface with the default gateway. 
+        Get's local ipv6 address of the interface with the default gateway.
         Return '::1' if no suitable interface is found
 
         :return: IPv6 address as a string
@@ -212,7 +213,7 @@ class Http(object):
     def __init__(self, baseurl=None):
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.DEBUG)  # TODO: Remove this in production
-        
+
         self.baseurl = baseurl
         self._response = None
         self.timeout = 10
@@ -221,16 +222,16 @@ class Http(object):
         """
         Launches a GET request and returns JSON answer as a dict or None on error.
 
-        :param url: Optional URL to getch from. If None (default) use baseurl given on init.
+        :param url: Optional URL to fetch from. If None (default) use baseurl given on init.
         :param params: Optional dict of parameters to add to URL query string.
- 
+
         :type url: str
         :type params: dict
 
         :return: JSON answer decoded into a dict or None on whatever error occured
         :rtype: dict | None
         """
-        self.__get(url=url,params=params)
+        self.__get(url=url, params=params)
         json = None
         try:
             json = self._response.json()
@@ -242,10 +243,10 @@ class Http(object):
         """
         Launches a GET request and returns answer as string or None on error.
 
-        :param url: Optional URL to getch from. Default is to use baseurl given to constructor.
+        :param url: Optional URL to fetch from. Default is to use baseurl given to constructor.
         :param params: Optional dict of parameters to add to URL query string.
         :param encoding: Optional encoding of the received text. Default is to let the lib try to figure out the right encoding.
- 
+
         :type url: str
         :type params: dict
         :type encoding: str
@@ -268,16 +269,16 @@ class Http(object):
         Launches a GET request and returns answer as raw binary data or None on error.
         This is usefull for downloading binary objects / files.
 
-        :param url: Optional URL to getch from. Default is to use baseurl given to constructor.
+        :param url: Optional URL to fetch from. Default is to use baseurl given to constructor.
         :param params: Optional dict of parameters to add to URL query string.
- 
+
         :type url: str
         :type params: dict
 
         :return: Answer as raw binary objector None on whatever error occured
         :rtype: bytes | None
         """
-        self.__get(url=url,params=params)
+        self.__get(url=url, params=params)
         return self._response.content
 
     def response_status(self):
@@ -334,17 +335,20 @@ class Http(object):
             self.logger.warning("Error sending GET request to {}: {}".format(url, e))
             return False
         return True
-    
+
+
 class Tcp_client(object):
-    """ Initializes a new instance of tcp_client
+    """ Creates a new instance of Tcp_client class
 
     :param host: Remote host name or ip address (v4 or v6)
     :param port: Remote host port to connect to
-    :param name: Name of this connection (mainly for logging purposes)
+    :param name: Name of this connection (mainly for logging purposes). Try to keep the name short.
     :param autoreconnect: Should the socket try to reconnect on lost connection (or finished connect cycle)
     :param connect_retries: Number of connect retries per cycle
     :param connect_cycle: Time between retries inside a connect cycle
     :param retry_cycle: Time between cycles if :param:autoreconnect is True
+    :param binary: Switch between binary and text mode. Text will be encoded / decoded using encoding parameter.
+    :param terminator: Terminator to use to split received data into chunks (split lines <cr> for example). If integer then split into n bytes. Default is None means process chunks as received.
 
     :type host: str
     :type port: int
@@ -353,16 +357,18 @@ class Tcp_client(object):
     :type connect_retries: int
     :type connect_cycle: int
     :type retry_cycle: int
+    :type binary: bool
+    :type terminator: int | bytes | str
     """
 
-    def __init__(self, host, port, name=None, autoreconnect=True, connect_retries=5, connect_cycle=5, retry_cycle=30, binary=False):
+    def __init__(self, host, port, name=None, autoreconnect=True, connect_retries=5, connect_cycle=5, retry_cycle=30, binary=False, terminator=False):
         self.logger = logging.getLogger(__name__)
 
         # Public properties
         self.name = name
         self.terminator = None
 
-        # "Private" properties (__ not used on purpose)
+        # "Private" properties
         self._host = host
         self._port = port
         self._autoreconnect = autoreconnect
@@ -406,16 +412,16 @@ class Tcp_client(object):
             self.logger.debug("{} is not a valid IP address, trying to resolve it as hostname".format(host))
             try:
                 self._ipver, sockettype, proto, canonname, socketaddr = socket.getaddrinfo(host, None)[0]
-                # Check if resolved address is IPv4 or IPv6
+                # Check if resolved address is IPv4 or IPv6
                 if self._ipver == socket.AF_INET:  # is IPv4
                     self._hostip, port = socketaddr
                 elif self._ipver == socket.AF_INET6:  # is IPv6
                     self._hostip, port, flow_info, scope_id = socketaddr
                 else:
-                    # This should never happen
+                    # This should never happen
                     self.logger.error("Unknown ip address family {}".format(self._ipver))
                     self._hostip = None
-                # Print ip address on successfull resolve
+                # Print ip address on successfull resolve
                 if self._hostip is not None:
                     self.logger.info("Resolved {} to {} address {}".format(self._host, 'IPv6' if self._ipver == socket.AF_INET6 else 'IPv4', self._hostip))
             except:
@@ -466,6 +472,11 @@ class Tcp_client(object):
         return self._is_connected
 
     def send(self, message):
+        """ Sends a message to the server. Can be a string, bytes or a bytes array.
+
+        :return: True if message has been successfully sent, else False.
+        :rtype: bool
+        """
         if not isinstance(message, (bytes, bytearray)):
             try:
                 message = message.encode('utf-8')
@@ -475,6 +486,8 @@ class Tcp_client(object):
         try:
             if self._is_connected:
                 self._socket.send(message)
+            else:
+                return False
         except:
             self.logger.warning("No connection to {}, cannot send data {}".format(self._host, msg))
             return False
@@ -517,7 +530,7 @@ class Tcp_client(object):
 
     def _connect(self):
         self.logger.debug("Connecting to {} using {} {} on TCP port {} {} autoreconnect".format(self._host, 'IPv6' if self._ipver == socket.AF_INET6 else 'IPv4', self._hostip, self._port, ('with' if self._autoreconnect else 'without')))
-        # Try to connect to remote host using ip (v4 or v6)
+        # Try to connect to remote host using ip (v4 or v6)
         try:
             self._socket = socket.socket(self._ipver, socket.SOCK_STREAM)
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -526,7 +539,7 @@ class Tcp_client(object):
             self._socket.settimeout(self._timeout)
             self._is_connected = True
             self.logger.info("Connected to {} on TCP port {}".format(self._host, self._port))
-        # Connection error
+        # Connection error
         except Exception as err:
             self._is_connected = False
             self._connect_counter += 1
@@ -552,13 +565,11 @@ class Tcp_client(object):
                             msg = str.rstrip(str(msg, 'utf-8'))
                         # If we work in line mode (with a terminator) slice buffer into single chunks based on terminator
                         if self.terminator:
-                            #self.logger.debug("********** We search for a terminator")
                             __buffer += msg
                             while True:
                                 # terminator = int means fixed size chunks
                                 if isinstance(self.terminator, int):
                                     i = self.terminator
-                                    #self.logger.debug("********** INT {} {}".format(i, len(__buffer)))
                                     if i > len(__buffer):
                                         break
                                 # terminator is str or bytes means search for it
@@ -566,7 +577,6 @@ class Tcp_client(object):
                                     i = __buffer.find(self.terminator)
                                     if i == -1:
                                         break
-                                    #self.logger.debug("********** FOUND")
                                     i += len(self.terminator)
                                 line = __buffer[:i]
                                 __buffer = __buffer[i:]
@@ -594,6 +604,7 @@ class Tcp_client(object):
             pass
 
     def close(self):
+        """ Closes the current client socket """
         self.logger.info("Closing connection to {} on TCP port {}".format(self._host, self._port))
         self.__running = False
         if self.__connect_thread is not None and self.__connect_thread.isAlive():
@@ -678,12 +689,12 @@ class _Client(object):
         string = self._iac_to_string(command)
         self.logger.debug("Sending IAC telnet command: '{}'".format(string))
         self.send(command)
- 
+
     def process_IAC(self, msg):
         """ Processes incomming IAC messages. Does nothing for now except logging them in clear text """
         string = self._iac_to_string(msg)
         self.logger.debug("Received IAC telnet command: '{}'".format(string))
-        
+
     def close(self):
         """ Client socket closes itself """
         self._process_queue()  # Be sure that possible remaining messages will be processed
@@ -696,14 +707,14 @@ class _Client(object):
         return True
 
     def _iac_to_string(self, msg):
-        iac = {1:'ECHO', 251:'WILL', 252:'WON\'T',253:'DO', 254:'DON\'T', 255: 'IAC'}
+        iac = {1: 'ECHO', 251: 'WILL', 252: 'WON\'T', 253: 'DO', 254: 'DON\'T', 255: 'IAC'}
         string = ''
         for char in msg:
             if char in iac:
                 string += iac[char] + ' '
             else:
                 string += '<UNKNOWN> '
-        return string.rstrip()        
+        return string.rstrip()
 
     def _process_queue(self):
         while not self._message_queue.empty():
@@ -777,7 +788,7 @@ class Tcp_server(object):
             self.logger.debug("{} is not a valid IP address, trying to resolve it as hostname".format(self._interface))
             try:
                 self._ipver, sockettype, proto, canonname, socketaddr = socket.getaddrinfo(self._interface, None)[0]
-                # Check if resolved address is IPv4 or IPv6
+                # Check if resolved address is IPv4 or IPv6
                 if self._ipver == socket.AF_INET:
                     self._interfaceip, port = socketaddr
                 elif self._ipver == socket.AF_INET6:
@@ -962,7 +973,6 @@ class Tcp_server(object):
         self.logger.info("Lost connection to client {}, removing it".format(client.name))
         self._disconnected_callback and self._disconnected_callback(self, client)
         self.__connection_poller.unregister(client.fd)
-        #client.close()
         del self.__connection_map[client.fd]
         return True
 
