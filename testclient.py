@@ -33,13 +33,13 @@ logger = logging.getLogger(__name__)
 
 logger.debug("Test started")
 
-apache = network.Tcp_client(name='Apache', host='192.168.1.5', port=80, autoreconnect=False, connect_cycle=1, retry_cycle=5)
+apache = network.Tcp_client(name='Apache', host='50.19.217.10', port=80, autoreconnect=False, connect_cycle=1, retry_cycle=5)
 apache.set_callbacks(connected=connected_callback, disconnected=disconnected_callback, data_received=receive_callback)
 apache.connect()
 
 netcat = network.Tcp_client(name='NetCat', host='127.0.0.1', port=5555, autoreconnect=True, connect_cycle=1, retry_cycle=5)
 netcat.set_callbacks(connected=connected_callback, disconnected=disconnected_callback, data_received=receive_callback)
-netcat.terminator='e'
+#netcat.terminator='e'
 netcat.connect()
 
 
@@ -48,7 +48,7 @@ while running:
 
 logger.debug("Ending...")
     
-apache.close()
+#apache.close()
 netcat.close()
 
 logger.debug("Test ended")
