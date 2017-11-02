@@ -48,7 +48,7 @@ def client_will_close(client):
 ##
 ## Example calls and tests start below
 ##
-server = Network.tcp_server(port=5555)
+server = Network.Tcp_server(port=5555)
 server.name = 'Test' # optional, can also be passed as parameter in init above or be left blank (default ip:port will be set by constructor)
 server.set_callbacks(   listening=listening_callback, 
                         incoming_connection=incoming_connection_callback,

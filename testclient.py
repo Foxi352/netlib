@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import network as Network
+import network
 import logging
 import time
 import signal
@@ -28,18 +28,18 @@ def receive_callback(client, data):
 
 signal.signal(signal.SIGINT, signal_handler)
 
-logging.basicConfig(format='%(asctime)s %(levelname)-8s %(module)-12s %(threadName)-12s %(message)s -- %(filename)s:%(funcName)s:%(lineno)d', datefmt='%Y-%m-%d %H:%M:%S')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)-8s %(module)-12s %(threadName)-12s %(message)s -- %(filename)s:%(funcName)s:%(lineno)d', datefmt='%Y-%m-%d %H:%M:%S')
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 logger.debug("Test started")
 
-apache = Network.tcp_client(name='Apache', host='192.168.1.5', port=80, autoreconnect=False, connect_cycle=1, retry_cycle=5)
+apache = network.Tcp_client(name='Apache', host='192.168.1.5', port=80, autoreconnect=False, connect_cycle=1, retry_cycle=5)
 apache.set_callbacks(connected=connected_callback, disconnected=disconnected_callback, data_received=receive_callback)
 apache.connect()
 
-netcat = Network.tcp_client(name='NetCat', host='127.0.0.1', port=5555, autoreconnect=True, connect_cycle=1, retry_cycle=5)
+netcat = network.Tcp_client(name='NetCat', host='127.0.0.1', port=5555, autoreconnect=True, connect_cycle=1, retry_cycle=5)
 netcat.set_callbacks(connected=connected_callback, disconnected=disconnected_callback, data_received=receive_callback)
+netcat.terminator='e'
 netcat.connect()
 
 

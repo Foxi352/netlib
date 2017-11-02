@@ -24,12 +24,12 @@
 
 |  *** ATTENTION: This is early work in progress. Interfaces are subject to change. ***
 |  *** DO NOT USE IN PRODUCTION until you know what you are doing ***
-|  
-This library contains the Network class for SmartHomeNG.
+|
 
-New network functions are going to be implemented in this library.
+This library contains the future network classes for SmartHomeNG.
+
+New network functions and utilities are going to be implemented in this library.
 This classes, functions and methods are mainly meant to be used by plugin developers
-This is work in progress and interfaces may be subject to modifications
 
 """
 
@@ -223,7 +223,6 @@ class Http(object):
     """
     def __init__(self, baseurl=None):
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)  # TODO: Remove this in production
 
         self.baseurl = baseurl
         self._response = None
@@ -331,7 +330,7 @@ class Http(object):
         Maybe this lib can be extented to your needs instead ?
 
         :return: Reponse object as returned by underlying requests library
-        :rtype: requests.Response
+        :rtype: `requests.Response <http://docs.python-requests.org/en/master/user/quickstart/#response-content>`_
         """
         return self._response
 
@@ -754,7 +753,6 @@ class Tcp_server(object):
 
     def __init__(self, port, interface='::', name=None):
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)  # TODO: Remove this in production
 
         # Public properties
         self.name = name
