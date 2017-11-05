@@ -29,6 +29,7 @@ def listening_callback(server):
 
 def incoming_connection_callback(server,client):
     logger.debug("CALLBACK: incoming connection on {} from {}".format(server.name, client.name))
+    client.send("Moien\n")
     client.set_callbacks(will_close=client_will_close)
 
 def disconnected_callback(server,client):

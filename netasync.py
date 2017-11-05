@@ -682,6 +682,8 @@ class _Client(object):
                 return False
         try:
             self._message_queue.put_nowait(message)
+            self.writer.write(message)
+            self.writer.drain()
         except:
             self.logger.warning("Error queueing message for client {}".format(self.name))
             return False
@@ -871,12 +873,11 @@ class Tcp_server(object):
         client.ipver = socket.AF_INET6 if Network.is_ipv6(client.ip) else socket.AF_INET
         client.port = peer[1]
         client.name = Network.ip_port_to_socket(client.ip, client.port)
+        client.writer = writer
         
         self.logger.info("Incoming connection from {} on socket {}".format(peer_socket, self.__our_socket))
         self._incoming_connection_callback and self._incoming_connection_callback(self, client)
 
-        writer.write(b'Hallo\n')
-        await writer.drain()
         while True:
             data = await reader.read(4096)
             if data:
@@ -887,45 +888,6 @@ class Tcp_server(object):
                 writer.close()
                 return
  
-    def __listening_thread_worker_old(self):
-        self.logger.debug("*** Listening thread called")
-        self.__loop.run_forever()
-        return
-        poller = select.poll()
-        poller.register(self._socket, select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
-        self.logger.debug("Waiting for incomming commections on socket {}".format(self.__our_socket))
-        while self.__running:
-            events = poller.poll(1000)
-            for fd, event in events:
-                if event & select.POLLERR:
-                    self.logger.debug("Listening thread  POLLERR")
-                if event & select.POLLHUP:
-                    self.logger.debug("Listening thread  POLLHUP")
-                if event & (select.POLLIN | select.POLLPRI):
-                    connection, peer = self._socket.accept()
-                    connection.setblocking(0)
-                    fd = connection.fileno()
-                    __peer_socket = Network.ip_port_to_socket(peer[0], peer[1])
-                    client = _Client(server=self, socket=connection, fd=fd)
-                    client.ip = peer[0]
-                    client.ipver = socket.AF_INET6 if Network.is_ipv6(client.ip) else socket.AF_INET
-                    client.port = peer[1]
-                    client.name = Network.ip_port_to_socket(client.ip, client.port)
-                    self.logger.info("Incoming connection from {} on socket {}".format(__peer_socket, self.__our_socket))
-                    self.__connection_map[fd] = client
-                    self._incoming_connection_callback and self._incoming_connection_callback(self, client)
-
-                    if self.__connection_thread is None:
-                        self.logger.debug("Connection thread not running yet, firing it up ...")
-                        self.__connection_thread = threading.Thread(target=self.__connection_thread_worker, name='TCP_Server')
-                    if self.__connection_poller is None:
-                        self.__connection_poller = select.poll()
-                    self.__connection_poller.register(connection, select.POLLOUT | select.POLLIN | select.POLLPRI | select.POLLHUP | select.POLLERR)
-                    if not self.__connection_thread.isAlive():
-                        self.__connection_thread.daemon = True
-                        self.__connection_thread.start()
-                    del client
-
     def __connection_thread_worker(self):
         """ This thread handles the send & receive tasks of connected clients. """
         self.logger.debug("Connection thread on socket {} starting up".format(self.__our_socket))
@@ -981,7 +943,8 @@ class Tcp_server(object):
         :return: True if message has been queued successfully.
         :rtype: bool
         """
-        return client.send(msg)
+        client.send(msg)
+        return True
 
     def disconnect(self, client):
         """ Disconnects a specific client
