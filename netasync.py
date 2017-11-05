@@ -834,21 +834,7 @@ class Tcp_server(object):
         self._incoming_connection_callback = incoming_connection
         self._data_received_callback = data_received
         self._disconnected_callback = disconnected
-
-    async def __handle_connection(self, reader, writer):
-        address = writer.get_extra_info('peername')
-        self.logger.debug("*** Test called {}_{}".format(*address))
-        writer.write(b'Hallo\n')
-        await writer.drain()
-        while True:
-            data = await reader.read(128)
-            if data:
-                self.logger.debug('*** Received {!r}'.format(data))
-            else:
-                self.logger.debug('*** Closing')
-                writer.close()
-                return
-            
+           
     def start(self):
         """ Start the server socket
 
@@ -856,23 +842,51 @@ class Tcp_server(object):
         :rtype: bool
         """
         if self._is_listening:
-            return
-        self.__loop = asyncio.get_event_loop()
-        self.__coroutine = asyncio.start_server(self.__handle_connection, self._interfaceip, self._port)   
-        self.__server = self.__loop.run_until_complete(self.__coroutine)
-        #self.__loop.run_until_complete(self.__listening_thread_worker())    
-
-        self.__listening_thread = threading.Thread(target=self.__listening_thread_worker, name='TCP_Listener')
-        self.__listening_thread.daemon = True
-        self.__listening_thread.start()
+            return False
+        try:
+            self.__loop = asyncio.get_event_loop()
+            self.__coroutine = asyncio.start_server(self.__handle_connection, self._interfaceip, self._port)   
+            self.__server = self.__loop.run_until_complete(self.__coroutine)
+        
+            self.__listening_thread = threading.Thread(target=self.__listening_thread_worker, name='TCP_Listener')
+            self.__listening_thread.daemon = True
+            self.__listening_thread.start()
+        except:
+            return False
         return True
 
     def __listening_thread_worker(self):
         self._is_listening = True
         self.__loop.run_forever();
-        #while self.__running:
-        #    asyncio.sleep(1)
+        self._is_listening = False
+        return True
 
+    async def __handle_connection(self, reader, writer):
+        peer = writer.get_extra_info('peername')
+        socket_object = writer.get_extra_info('socket')
+        peer_socket = Network.ip_port_to_socket(peer[0], peer[1])
+        
+        client = _Client(server=self, socket=socket_object)
+        client.ip = peer[0]
+        client.ipver = socket.AF_INET6 if Network.is_ipv6(client.ip) else socket.AF_INET
+        client.port = peer[1]
+        client.name = Network.ip_port_to_socket(client.ip, client.port)
+        
+        self.logger.info("Incoming connection from {} on socket {}".format(peer_socket, self.__our_socket))
+        self._incoming_connection_callback and self._incoming_connection_callback(self, client)
+
+        writer.write(b'Hallo\n')
+        await writer.drain()
+        while True:
+            data = await reader.read(4096)
+            if data:
+                self.logger.debug('*** Received {!r}'.format(data))
+            else:
+                self.logger.debug('*** Closing')
+                self._disconnected_callback and self._disconnected_callback(self, client)
+                writer.close()
+                return
+ 
     def __listening_thread_worker_old(self):
         self.logger.debug("*** Listening thread called")
         self.__loop.run_forever()
@@ -1000,15 +1014,11 @@ class Tcp_server(object):
         """ Closes running listening socket """
         self.logger.info("Shutting down listening socket on interface {} port {}".format(self._interface, self._port))
         self.__running = False
-        self.logger.debug("Closing the server")
         self.__server.close()
-        self.logger.debug("Stopping the event loop")
         self.__loop.call_soon_threadsafe(self.__loop.stop)
-
-        #self.__loop.run_until_complete(asyncio.gather(*asyncio.Task.all_tasks()))
-
-        self.logger.debug("Closing the event loop")
-        self.__loop.close()
-        if self.__listening_thread is not None and self.__listening_thread.isAlive():
+        if self.__listening_thread and self.__listening_thread.isAlive():
             self.__listening_thread.join()
+        while self.__loop.is_running():
+            pass
+        self.__loop.close()
         

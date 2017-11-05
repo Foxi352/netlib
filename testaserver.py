@@ -57,8 +57,7 @@ server.start()
 
 
 while running:
-    time.sleep(2)
-    logger.debug("PING")
+    time.sleep(0.1)
 
 logger.debug("Ending...")
     
