@@ -40,6 +40,7 @@ import queue
 import re
 import requests
 import select
+import signal
 import socket
 import threading
 import time
@@ -635,11 +636,11 @@ class _Client(object):
     :type socket: function
     :type fd: int
     """
-    def __init__(self, server=None, socket=None):
+    def __init__(self, server=None, socket=None, ip=None, port=None):
         self.logger = logging.getLogger(__name__)
         self.name = None
-        self.ip = None
-        self.port = None
+        self.ip = ip
+        self.port = port
         self.ipver = None
         self.writer = None
         self.process_iac = True
@@ -678,6 +679,7 @@ class _Client(object):
                 self.logger.warning("Error encoding data for client {}".format(self.name))
                 return False
         try:
+            
             self.writer.write(message)
             self.writer.drain()
         except:
@@ -760,18 +762,15 @@ class Tcp_server(object):
         self.__server = None
         self.__listening_thread = None
         self.__listening_threadlock = threading.Lock()
-        self.__connection_thread = None
-        self.__connection_threadlock = threading.Lock()
-        self.__connection_poller = None
-        self.__message_queues = {}
-        self.__connection_map = {}
         self.__running = True
 
         # Test if host is an ip address or a host name
-        if Network.is_ip(self._interface):
+        if self._interface == '' or Network.is_ip(self._interface):
             # host is a valid ip address (v4 or v6)
-            self.logger.debug("{} is a valid IP address".format(self._interface))
             self._interfaceip = self._interface
+            if self._interface == '':
+                self._interface = 'All Ipv4/Ipv6'
+            self.logger.debug("'{}' is a valid IP address".format(self._interface))
             if Network.is_ipv6(self._interfaceip):
                 self._ipver = socket.AF_INET6
             else:
@@ -815,7 +814,7 @@ class Tcp_server(object):
         self._incoming_connection_callback = incoming_connection
         self._data_received_callback = data_received
         self._disconnected_callback = disconnected
-           
+    
     def start(self):
         """ Start the server socket
 
@@ -827,10 +826,11 @@ class Tcp_server(object):
         try:
             self.logger.info("Starting up TCP server socket {}".format(self.__our_socket))
             self.__loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.__loop)
             self.__coroutine = asyncio.start_server(self.__handle_connection, self._interfaceip, self._port)   
             self.__server = self.__loop.run_until_complete(self.__coroutine)
 
-            self.__listening_thread = threading.Thread(target=self.__listening_thread_worker, name='TCP_Listener')
+            self.__listening_thread = threading.Thread(target=self.__listening_thread_worker, name='TCP_Server_{}'.format(self.name))
             self.__listening_thread.daemon = True
             self.__listening_thread.start()
         except:
@@ -839,11 +839,19 @@ class Tcp_server(object):
 
     def __listening_thread_worker(self):
         """ Runs the asyncio loop in a separate thread to not block the Tcp_server.start() method """
-        self.logger.debug("**** Starting listener thread")
         self._is_listening = True
-        self.__loop.run_forever();
+        try:
+            self.__loop.run_forever()
+        except:
+            self.logger.debug('*** Error in loop.run_forever()')
+        finally:
+            asyncio.set_event_loop(self.__loop)
+            for task in asyncio.Task.all_tasks():
+                task.cancel()
+            self.__server.close()
+            self.__loop.run_until_complete(self.__server.wait_closed())
+            self.__loop.close()
         self._is_listening = False
-        self.logger.debug("**** Stopping listener thread")
         return True
 
     async def __handle_connection(self, reader, writer):
@@ -852,10 +860,8 @@ class Tcp_server(object):
         socket_object = writer.get_extra_info('socket')
         peer_socket = Network.ip_port_to_socket(peer[0], peer[1])
         
-        client = _Client(server=self, socket=socket_object)
-        client.ip = peer[0]
+        client = _Client(server=self, socket=socket_object, ip=peer[0], port=peer[1])
         client.ipver = socket.AF_INET6 if Network.is_ipv6(client.ip) else socket.AF_INET
-        client.port = peer[1]
         client.name = Network.ip_port_to_socket(client.ip, client.port)
         client.writer = writer
         
@@ -879,8 +885,11 @@ class Tcp_server(object):
                     if data[0] == 0xFF and client.process_iac:
                         client._process_IAC(data)                
             else:
-                self.__close_client(client)
-                del client
+                try:
+                    #self.__close_client(client)
+                    pass
+                finally:
+                    del client
                 return
  
     def __close_client(self, client):
@@ -920,26 +929,18 @@ class Tcp_server(object):
         client.close()
         return True
 
-    def _sleep(self, time_lapse):
-        """ Non blocking sleep. Does return when self.close is called and running set to False.
-
-        :param time_lapse: Time in seconds to sleep
-        :type time_lapse: float
-        """
-        time_start = time.time()
-        time_end = (time_start + time_lapse)
-        while self.__running and time_end > time.time():
-            pass
-
     def close(self):
         """ Closes running listening socket """
         self.logger.info("Shutting down listening socket on interface {} port {}".format(self._interface, self._port))
+        asyncio.set_event_loop(self.__loop)
+        active_connections = len([task for task in asyncio.Task.all_tasks() if not task.done()])
+        if active_connections > 0:
+            self.logger.info('Tcp_server still has {} active connection(s), cleaning up'.format(active_connections))
         self.__running = False
-        self.__server.close()
         self.__loop.call_soon_threadsafe(self.__loop.stop)
-        if self.__listening_thread and self.__listening_thread.isAlive():
-            self.__listening_thread.join()
         while self.__loop.is_running():
             pass
+        if self.__listening_thread and self.__listening_thread.isAlive():
+            self.__listening_thread.join()
         self.__loop.close()
         
