@@ -40,7 +40,6 @@ import queue
 import re
 import requests
 import select
-import signal
 import socket
 import threading
 import time
@@ -736,11 +735,18 @@ class Tcp_server(object):
     :type name: str
     """
 
-    def __init__(self, port, interface='::', name=None):
+    MODE_TEXT = 1
+    MODE_TEXT_LINE = 2
+    MODE_BINARY = 3
+    MODE_FIXED_LENGTH = 4
+
+    def __init__(self, port, interface='', name=None, mode=MODE_BINARY, terminator=None):
         self.logger = logging.getLogger(__name__)
 
         # Public properties
         self.name = name
+        self.mode = mode
+        self.terminator = terminator
 
         # "Private" properties
         self._interface = interface
@@ -839,13 +845,14 @@ class Tcp_server(object):
 
     def __listening_thread_worker(self):
         """ Runs the asyncio loop in a separate thread to not block the Tcp_server.start() method """
+        asyncio.set_event_loop(self.__loop)
         self._is_listening = True
         try:
             self.__loop.run_forever()
         except:
             self.logger.debug('*** Error in loop.run_forever()')
         finally:
-            asyncio.set_event_loop(self.__loop)
+            
             for task in asyncio.Task.all_tasks():
                 task.cancel()
             self.__server.close()
@@ -870,7 +877,11 @@ class Tcp_server(object):
 
         while True:
             try:
-                data = await reader.read(4096)
+                if self.mode == self.MODE_TEXT_LINE:
+                    self.logger.debug("***")
+                    data = await reader.readline()
+                else:
+                    data = await reader.read(4096)
             except:
                 data = None
 
@@ -886,7 +897,7 @@ class Tcp_server(object):
                         client._process_IAC(data)                
             else:
                 try:
-                    #self.__close_client(client)
+                    self.__close_client(client)
                     pass
                 finally:
                     del client
